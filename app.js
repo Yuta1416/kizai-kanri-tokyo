@@ -176,7 +176,7 @@ function avail(item) { return Math.max(0, item.total - item.out - item.special);
 
 function renderStats() {
   const t = inv.length;
-  const inC = inv.filter(i => calcSt(i) === 'IN').length;
+  const inC  = inv.filter(i => calcSt(i) === 'IN').length;
   const outC = inv.filter(i => ['OUT','PARTIAL'].includes(calcSt(i))).length;
   const repC = inv.filter(i => calcSt(i) === '修理中').length;
   const renC = inv.filter(i => calcSt(i) === 'レンタル中').length;
@@ -192,7 +192,8 @@ function renderStats() {
 function renderCats() {
   const sel = document.getElementById('catF'), cur = sel.value;
   const cats = [...new Set(inv.map(i => i.cat))].sort();
-  sel.innerHTML = '<option value="">すべてのカテゴリ</option>' + cats.map(c => `<option value="${c}"${c===cur?' selected':''}>${c}</option>`).join('');
+  sel.innerHTML = '<option value="">すべてのカテゴリ</option>' +
+    cats.map(c => `<option value="${c}"${c===cur?' selected':''}>${c}</option>`).join('');
 }
 
 function badge(st) {
@@ -244,7 +245,9 @@ function renderOut() {
     <td>${o.staff||'—'}</td><td style="font-weight:700">${o.model}</td>
     <td style="text-align:center">${o.qty}</td>
     <td style="font-size:11px">${o.returnDate||'未設定'}</td>
-    <td>${o.returnDate?`<span class="badge s-info" style="font-size:10px"><i class="ti ti-clock"></i>自動</span>`:`<span class="badge s-absent" style="font-size:10px">手動</span>`}</td>
+    <td>${o.returnDate
+      ?`<span class="badge s-info" style="font-size:10px"><i class="ti ti-clock"></i>自動</span>`
+      :`<span class="badge s-absent" style="font-size:10px">手動</span>`}</td>
     <td><button class="act" onclick="openReturnFromOut(${i})"><i class="ti ti-arrow-down-left"></i></button></td>
   </tr>`).join('');
 }
@@ -302,9 +305,9 @@ function openCheckout(idx) {
 }
 function doCheckout() {
   const item = inv[coIdx], qty = parseInt(document.getElementById('co-qty').value)||0;
-  const proj = document.getElementById('co-proj').value;
+  const proj  = document.getElementById('co-proj').value;
   const staff = document.getElementById('co-staff').value;
-  const ret = document.getElementById('co-ret').value;
+  const ret   = document.getElementById('co-ret').value;
   if (qty < 1 || qty > avail(item)) { alert('数量が無効です'); return; }
   item.out += qty;
   const now = new Date().toLocaleString('ja-JP');
@@ -316,16 +319,16 @@ function doCheckout() {
 function openReturn(idx) {
   retIdx = idx; const item = inv[idx];
   document.getElementById('ret-item').value = `${item.maker} ${item.model}`;
-  document.getElementById('ret-qty').value = item.out;
-  document.getElementById('ret-qty').max = item.out;
+  document.getElementById('ret-qty').value  = item.out;
+  document.getElementById('ret-qty').max    = item.out;
   document.getElementById('ret-note').value = '';
   openModal('modal-return');
 }
 function openReturnFromOut(oi) {
   const o = outItems[oi]; retIdx = o.invIdx;
   document.getElementById('ret-item').value = o.model;
-  document.getElementById('ret-qty').value = o.qty;
-  document.getElementById('ret-qty').max = o.qty;
+  document.getElementById('ret-qty').value  = o.qty;
+  document.getElementById('ret-qty').max    = o.qty;
   document.getElementById('ret-note').value = '';
   openModal('modal-return');
 }
@@ -344,15 +347,16 @@ function doReturn() {
 function openSpecial(idx) {
   spIdx = idx; const item = inv[idx];
   document.getElementById('sp-item').value = `${item.maker} ${item.model}`;
-  document.getElementById('sp-qty').value = 1;
-  document.getElementById('sp-qty').max = avail(item);
+  document.getElementById('sp-qty').value  = 1;
+  document.getElementById('sp-qty').max    = avail(item);
   document.getElementById('sp-note').value = item.note || '';
   openModal('modal-special');
 }
 function doSpecial() {
-  const item = inv[spIdx], status = document.getElementById('sp-status').value;
-  const qty = parseInt(document.getElementById('sp-qty').value)||0;
-  const note = document.getElementById('sp-note').value;
+  const item   = inv[spIdx];
+  const status = document.getElementById('sp-status').value;
+  const qty    = parseInt(document.getElementById('sp-qty').value)||0;
+  const note   = document.getElementById('sp-note').value;
   if (qty < 1 || qty > avail(item)) { alert('数量が無効です'); return; }
   item.special += qty; item.status = status; item.note = note;
   const now = new Date().toLocaleString('ja-JP');
@@ -407,31 +411,125 @@ function exportCSV() {
   a.download = '機材在庫.csv'; a.click();
 }
 
+// ============================================================
+// Excel読み込み: 受注書_A4横フォーマット対応
+// ============================================================
 function handleFile(e) {
   const file = e.target.files[0]; if (!file) return;
   const reader = new FileReader();
   reader.onload = ev => {
     try {
-      const wb = XLSX.read(ev.target.result, {type:'binary'});
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, {header:1});
-      const imported = rows.slice(1).filter(r => r[2] && parseInt(r[3]) > 0).map(r => ({
-        cat:r[0]||'その他', maker:r[1]||'—', model:String(r[2]),
-        total:parseInt(r[3])||0, out:parseInt(r[4])||0,
-        special:0, status:'IN', note:r[6]||''
-      }));
-      if (!imported.length) { alert('読み込めるデータがありませんでした'); return; }
-      if (confirm(`${imported.length}件を読み込みます。追加しますか？\n（キャンセルで上書き）`)) {
-        inv.push(...imported);
-      } else { inv = imported; }
+      const wb   = XLSX.read(ev.target.result, {type:'binary'});
+
+      // シート名「受注書_A4横」を優先、なければ最初のシート
+      const wsName = wb.SheetNames.includes('受注書_A4横')
+        ? '受注書_A4横' : wb.SheetNames[0];
+      const ws   = wb.Sheets[wsName];
+      const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+
+      // --- ヘッダー情報を取得 ---
+      // 行インデックスは0始まり（Excel行-1）
+      const projectName = String(rows[2]?.[2] || '').trim();  // C3
+      const staff       = String(rows[3]?.[14]|| '').trim();  // O4
+      const dateOut     = String(rows[4]?.[2] || '').trim();  // C5
+      const dateReturn  = String(rows[4]?.[8] || '').trim();  // I5
+
+      // --- 7行目以降（index 6〜）の機材データを読み取る ---
+      const equipmentList = [];
+      for (let i = 6; i < rows.length; i++) {
+        const row      = rows[i];
+        const category = String(row[0] || '').trim();  // A列
+        const itemName = String(row[4] || '').trim();  // E列: 機材名
+        // K列(index10)とL列(index11)のマージセル → どちらかに値がある
+        const qtyRaw   = row[10] !== '' ? row[10] : row[11];
+        const qty      = parseInt(qtyRaw) || 0;
+        const note     = String(row[12] || '').trim(); // M列: 備考
+
+        // 数量が入っていて機材名がある行のみ処理
+        if (!itemName || qty <= 0) continue;
+        // セクションヘッダー行をスキップ（機材名がカテゴリ名と同じケース等）
+        if (qty <= 0) continue;
+
+        equipmentList.push({ category, itemName, qty, note });
+      }
+
+      if (equipmentList.length === 0) {
+        alert('数量が入力された機材が見つかりませんでした。\nK〜L列に数量が入力されているか確認してください。');
+        return;
+      }
+
+      // --- 在庫マスターに反映（持ち出し処理）---
+      const now = new Date().toLocaleString('ja-JP');
+      const notFound = [];
+      let appliedCount = 0;
+
+      equipmentList.forEach(eq => {
+        // マスターから機材名で部分一致検索
+        const masterIdx = inv.findIndex(item =>
+          item.model.includes(eq.itemName) || eq.itemName.includes(item.model)
+        );
+
+        if (masterIdx === -1) {
+          notFound.push(eq.itemName);
+          return;
+        }
+
+        const item = inv[masterIdx];
+        const av   = avail(item);
+        const applyQty = Math.min(eq.qty, av); // 在庫を超えないように
+        if (applyQty <= 0) {
+          notFound.push(`${eq.itemName}（在庫不足）`);
+          return;
+        }
+
+        item.out += applyQty;
+        outItems.push({
+          id: Date.now() + masterIdx,
+          invIdx: masterIdx,
+          model: `${item.maker} ${item.model}`,
+          qty: applyQty,
+          project: projectName || '（未入力）',
+          staff:   staff       || '（未入力）',
+          returnDate: dateReturn || '',
+          date: now,
+        });
+        history.push({
+          date: now,
+          project: projectName || '（未入力）',
+          staff:   staff       || '（未入力）',
+          model:   `${item.maker} ${item.model}`,
+          qty:     applyQty,
+          action:  'OUT',
+          note:    dateReturn ? `返却予定:${dateReturn}` : '',
+        });
+        appliedCount++;
+      });
+
       render();
-    } catch(err) { alert('ファイルの読み込みに失敗しました'); }
+
+      // 結果メッセージ
+      let msg = `✅ 受注書を読み込みました\n\n`;
+      msg += `案件名: ${projectName || '（未入力）'}\n`;
+      msg += `担当者: ${staff      || '（未入力）'}\n`;
+      msg += `持出予定: ${dateOut  || '（未入力）'}\n`;
+      msg += `返却予定: ${dateReturn|| '（未入力）'}\n\n`;
+      msg += `反映した機材: ${appliedCount}件`;
+      if (notFound.length > 0) {
+        msg += `\n\n⚠️ マスターで見つからなかった機材:\n${notFound.join('\n')}`;
+      }
+      alert(msg);
+
+    } catch(err) {
+      alert('ファイルの読み込みに失敗しました。\nエラー: ' + err.message);
+    }
   };
   reader.readAsBinaryString(file);
   e.target.value = '';
 }
 
+// ============================================================
 // 自動返却チェック（1分ごと）
+// ============================================================
 function checkAutoReturn() {
   const now = new Date();
   outItems.forEach((o, i) => {
@@ -440,7 +538,13 @@ function checkAutoReturn() {
     if (isNaN(dt) || now < dt) return;
     const item = inv[o.invIdx];
     item.out = Math.max(0, item.out - o.qty);
-    history.push({ date:now.toLocaleString('ja-JP'), project:o.project, staff:o.staff, model:o.model, qty:o.qty, action:'自動返却', note:`返却予定:${o.returnDate}` });
+    history.push({
+      date: now.toLocaleString('ja-JP'),
+      project: o.project, staff: o.staff,
+      model: o.model, qty: o.qty,
+      action: '自動返却',
+      note: `返却予定:${o.returnDate}`,
+    });
     outItems.splice(i, 1);
     render();
   });
