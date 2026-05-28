@@ -108,3 +108,54 @@ tr:hover td { background: var(--bg3); }
   .topbar { flex-direction: column; align-items: flex-start; }
   .tab { padding: 7px 10px; font-size: 12px; }
 }
+
+/* ===== 案件グループ ===== */
+.proj-group {
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.proj-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg2);
+  cursor: pointer;
+  user-select: none;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.proj-group-head:hover { background: var(--bg3); }
+.proj-group-left  { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.proj-group-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.proj-chevron { font-size: 14px; color: var(--text2); transition: transform 0.2s; }
+.proj-group-name { font-size: 14px; font-weight: 700; color: var(--text); }
+.proj-group-meta { font-size: 12px; color: var(--text2); }
+.proj-count { font-size: 12px; color: var(--text2); }
+.btn-bulk-return {
+  background: var(--text);
+  color: var(--bg);
+  border-color: transparent;
+  font-size: 12px;
+  padding: 5px 12px;
+}
+.btn-bulk-return:hover { opacity: 0.8; }
+
+.proj-group-body {
+  border-top: 0.5px solid var(--border);
+  background: var(--bg);
+  padding: 6px 0;
+}
+.proj-item-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px;
+  border-bottom: 0.5px solid var(--border);
+  flex-wrap: wrap;
+}
+.proj-item-row:last-child { border-bottom: none; }
+.proj-item-name { font-size: 13px; font-weight: 500; color: var(--text); flex: 1; min-width: 120px; }
+.proj-item-qty  { font-size: 13px; font-weight: 700; color: var(--danger-text); min-width: 40px; }
