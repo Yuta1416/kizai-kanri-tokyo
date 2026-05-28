@@ -238,18 +238,77 @@ function render() {
 }
 
 function renderOut() {
-  const tb = document.getElementById('tbl-out');
-  if (!outItems.length) { tb.innerHTML = `<tr><td colspan="8" class="empty">持ち出し中の機材はありません</td></tr>`; return; }
-  tb.innerHTML = outItems.map((o,i) => `<tr>
-    <td style="font-size:11px">${o.date}</td><td>${o.project||'—'}</td>
-    <td>${o.staff||'—'}</td><td style="font-weight:700">${o.model}</td>
-    <td style="text-align:center">${o.qty}</td>
-    <td style="font-size:11px">${o.returnDate||'未設定'}</td>
-    <td>${o.returnDate
-      ?`<span class="badge s-info" style="font-size:10px"><i class="ti ti-clock"></i>自動</span>`
-      :`<span class="badge s-absent" style="font-size:10px">手動</span>`}</td>
-    <td><button class="act" onclick="openReturnFromOut(${i})"><i class="ti ti-arrow-down-left"></i></button></td>
-  </tr>`).join('');
+  const container = document.getElementById('out-container');
+  if (!outItems.length) {
+    container.innerHTML = `<div class="empty">持ち出し中の機材はありません</div>`;
+    return;
+  }
+
+  // 案件名でグループ化
+  const groups = {};
+  outItems.forEach((o, i) => {
+    const key = o.project || '（案件名未入力）';
+    if (!groups[key]) groups[key] = { items:[], staff:o.staff, returnDate:o.returnDate, date:o.date };
+    groups[key].items.push({ ...o, outIdx: i });
+  });
+
+  container.innerHTML = Object.entries(groups).map(([project, g]) => {
+    const autoLabel = g.returnDate
+      ? `<span class="badge s-info" style="font-size:10px"><i class="ti ti-clock"></i>自動 ${g.returnDate}</span>`
+      : `<span class="badge s-absent" style="font-size:10px">手動返却</span>`;
+    const itemRows = g.items.map(o => `
+      <div class="proj-item-row">
+        <span class="proj-item-name">${o.model}</span>
+        <span class="proj-item-qty">×${o.qty}</span>
+        <button class="act" style="padding:2px 7px;font-size:11px" onclick="openReturnFromOut(${o.outIdx})">
+          <i class="ti ti-arrow-down-left"></i> 返却
+        </button>
+      </div>`).join('');
+
+    return `
+      <div class="proj-group">
+        <div class="proj-group-head" onclick="toggleGroup(this)">
+          <div class="proj-group-left">
+            <i class="ti ti-chevron-down proj-chevron"></i>
+            <span class="proj-group-name">${project}</span>
+            <span class="proj-group-meta">${g.staff||'担当未入力'}</span>
+            ${autoLabel}
+          </div>
+          <div class="proj-group-right">
+            <span class="proj-count">${g.items.length}品目</span>
+            <button class="act btn-bulk-return" onclick="bulkReturn('${project}', event)">
+              <i class="ti ti-rotate"></i> 一括返却
+            </button>
+          </div>
+        </div>
+        <div class="proj-group-body">${itemRows}</div>
+      </div>`;
+  }).join('');
+}
+
+function toggleGroup(head) {
+  const body = head.nextElementSibling;
+  const chevron = head.querySelector('.proj-chevron');
+  const isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : 'block';
+  chevron.style.transform = isOpen ? 'rotate(-90deg)' : 'rotate(0deg)';
+}
+
+function bulkReturn(project, e) {
+  e.stopPropagation();
+  if (!confirm(`「${project}」の機材を全て返却しますか？`)) return;
+  const now = new Date().toLocaleString('ja-JP');
+  const targets = outItems.filter(o => (o.project || '（案件名未入力）') === project);
+  targets.forEach(o => {
+    const item = inv[o.invIdx];
+    item.out = Math.max(0, item.out - o.qty);
+    history.push({ date:now, project:o.project, staff:o.staff, model:o.model, qty:o.qty, action:'一括返却', note:`案件:${project}` });
+  });
+  // 対象を一括削除
+  for (let i = outItems.length - 1; i >= 0; i--) {
+    if ((outItems[i].project || '（案件名未入力）') === project) outItems.splice(i, 1);
+  }
+  render();
 }
 
 function renderSpecial() {
@@ -271,17 +330,47 @@ function renderSpecial() {
 }
 
 function renderHistory() {
-  const tb = document.getElementById('tbl-hist');
-  if (!history.length) { tb.innerHTML = `<tr><td colspan="7" class="empty">履歴がありません</td></tr>`; return; }
-  tb.innerHTML = [...history].reverse().map(h => {
-    const cls = h.action==='OUT'?'s-out':h.action==='自動返却'?'s-info':'s-in';
-    return `<tr>
-      <td style="font-size:11px">${h.date}</td><td>${h.project||'—'}</td>
-      <td>${h.staff||'—'}</td><td>${h.model}</td>
-      <td style="text-align:center">${h.qty}</td>
-      <td><span class="badge ${cls}">${h.action}</span></td>
-      <td style="font-size:11px;color:var(--text2)">${h.note||'—'}</td>
-    </tr>`;
+  const container = document.getElementById('hist-container');
+  if (!history.length) {
+    container.innerHTML = `<div class="empty">履歴がありません</div>`;
+    return;
+  }
+
+  // 案件名でグループ化（日付降順）
+  const groups = {};
+  [...history].reverse().forEach(h => {
+    const key = h.project || '（案件名未入力）';
+    if (!groups[key]) groups[key] = { items:[], staff:h.staff, lastDate:h.date };
+    groups[key].items.push(h);
+  });
+
+  container.innerHTML = Object.entries(groups).map(([project, g]) => {
+    const itemRows = g.items.map(h => {
+      const cls = h.action==='OUT'?'s-out':h.action==='自動返却'||h.action==='一括返却'?'s-info':'s-in';
+      return `
+        <div class="proj-item-row">
+          <span style="font-size:11px;color:var(--text2);width:120px;flex-shrink:0">${h.date}</span>
+          <span class="proj-item-name">${h.model}</span>
+          <span class="proj-item-qty">×${h.qty}</span>
+          <span class="badge ${cls}" style="font-size:10px">${h.action}</span>
+          <span style="font-size:11px;color:var(--text2)">${h.note||''}</span>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="proj-group">
+        <div class="proj-group-head" onclick="toggleGroup(this)">
+          <div class="proj-group-left">
+            <i class="ti ti-chevron-down proj-chevron"></i>
+            <span class="proj-group-name">${project}</span>
+            <span class="proj-group-meta">${g.staff||''}</span>
+          </div>
+          <div class="proj-group-right">
+            <span class="proj-count">${g.items.length}件</span>
+          </div>
+        </div>
+        <div class="proj-group-body">${itemRows}</div>
+      </div>`;
   }).join('');
 }
 
