@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>機材在庫管理</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="topbar-left">
+      <i class="ti ti-package" aria-hidden="true"></i>
+      <h1>機材在庫管理</h1>
+    </div>
+    <div class="topbar-right">
+      <button class="btn" onclick="document.getElementById('xlsxIn').click()"><i class="ti ti-upload" aria-hidden="true"></i> Excel読み込み</button>
+      <button class="btn" onclick="exportCSV()"><i class="ti ti-download" aria-hidden="true"></i> CSV出力</button>
+      <button class="btn btn-primary" onclick="openModal('add')"><i class="ti ti-plus" aria-hidden="true"></i> 機材追加</button>
+      <input type="file" id="xlsxIn" accept=".xlsx,.csv" style="display:none" onchange="handleFile(event)">
+    </div>
+  </header>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="legend">
+    <span class="badge s-in"><i class="ti ti-circle-check"></i> IN</span>
+    <span class="badge s-partial"><i class="ti ti-circle-half"></i> PARTIAL</span>
+    <span class="badge s-out"><i class="ti ti-circle-x"></i> OUT</span>
+    <span class="badge s-repair"><i class="ti ti-tool"></i> 修理中</span>
+    <span class="badge s-rental"><i class="ti ti-building-store"></i> レンタル中</span>
+    <span class="badge s-absent"><i class="ti ti-clock-off"></i> 長期不在</span>
+  </div>
+
+  <nav class="tab-bar">
+    <button class="tab on" onclick="switchTab('all',this)">すべて</button>
+    <button class="tab" onclick="switchTab('out',this)">持ち出し中</button>
+    <button class="tab" onclick="switchTab('special',this)">修理・レンタル・不在</button>
+    <button class="tab" onclick="switchTab('history',this)">履歴</button>
+  </nav>
+
+  <div id="view-all">
+    <div class="controls">
+      <input type="text" id="srch" placeholder="検索（機材名・メーカー・備考）" oninput="render()">
+      <select id="catF" onchange="render()"><option value="">すべてのカテゴリ</option></select>
+      <select id="stF" onchange="render()">
+        <option value="">すべてのステータス</option>
+        <option value="IN">IN</option><option value="PARTIAL">PARTIAL</option>
+        <option value="OUT">OUT</option><option value="修理中">修理中</option>
+        <option value="レンタル中">レンタル中</option><option value="長期不在">長期不在</option>
+      </select>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th style="width:13%">カテゴリ</th><th style="width:13%">メーカー</th>
+          <th style="width:20%">型番・品名</th><th style="width:6%">総数</th>
+          <th style="width:6%">残数</th><th style="width:12%">ステータス</th>
+          <th style="width:18%">備考</th><th style="width:12%">操作</th>
+        </tr></thead>
+        <tbody id="tbl-all"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="view-out" style="display:none">
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th style="width:13%">日時</th><th style="width:16%">案件名</th>
+          <th style="width:11%">担当者</th><th style="width:18%">機材名</th>
+          <th style="width:6%">数量</th><th style="width:16%">返却予定</th>
+          <th style="width:10%">返却方式</th><th style="width:10%">操作</th>
+        </tr></thead>
+        <tbody id="tbl-out"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="view-special" style="display:none">
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th style="width:12%">カテゴリ</th><th style="width:13%">メーカー</th>
+          <th style="width:18%">型番・品名</th><th style="width:6%">数量</th>
+          <th style="width:13%">ステータス</th>
+          <th style="width:28%">備考（預け先・返却予定等）</th>
+          <th style="width:10%">操作</th>
+        </tr></thead>
+        <tbody id="tbl-special"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="view-history" style="display:none">
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th style="width:13%">日時</th><th style="width:15%">案件名</th>
+          <th style="width:11%">担当者</th><th style="width:18%">機材名</th>
+          <th style="width:6%">数量</th><th style="width:13%">アクション</th>
+          <th style="width:24%">備考</th>
+        </tr></thead>
+        <tbody id="tbl-hist"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Modals -->
+<div class="modal-backdrop" id="modal-checkout">
+  <div class="modal">
+    <h3><i class="ti ti-arrow-up-right"></i> 持ち出し申請</h3>
+    <div class="fr"><label>機材</label><input id="co-item" readonly></div>
+    <div class="fr"><label>持ち出し数（残数: <span id="co-avail"></span>）</label><input type="number" id="co-qty" min="1" value="1"></div>
+    <div class="fr"><label>案件名</label><input id="co-proj" placeholder="例: ○○ライブ"></div>
+    <div class="fr"><label>担当者</label><input id="co-staff" placeholder="担当者名"></div>
+    <div class="fr"><label>返却予定日時（例: 2026/5/28 23:00）</label><input id="co-ret" placeholder="未設定の場合は手動返却"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modal-checkout')">キャンセル</button>
+      <button class="btn btn-primary" onclick="doCheckout()">持ち出し確定</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal-special">
+  <div class="modal">
+    <h3><i class="ti ti-tool"></i> 特殊ステータス設定</h3>
+    <div class="fr"><label>機材</label><input id="sp-item" readonly></div>
+    <div class="fr"><label>ステータス</label>
+      <select id="sp-status">
+        <option value="修理中">修理中</option>
+        <option value="レンタル中">レンタル中</option>
+        <option value="長期不在">長期不在</option>
+      </select>
+    </div>
+    <div class="fr"><label>数量</label><input type="number" id="sp-qty" min="1" value="1"></div>
+    <div class="fr"><label>備考（預け先・返却予定・理由等）</label><textarea id="sp-note" placeholder="例: ○○修理店 預け日5/1 返却予定6/1"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modal-special')">キャンセル</button>
+      <button class="btn btn-primary" onclick="doSpecial()">設定確定</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal-add">
+  <div class="modal">
+    <h3><i class="ti ti-plus"></i> 機材追加</h3>
+    <div class="fr"><label>カテゴリ</label><input id="add-cat" placeholder="例: Microphone"></div>
+    <div class="fr"><label>メーカー</label><input id="add-maker" placeholder="例: SHURE"></div>
+    <div class="fr"><label>型番・品名</label><input id="add-model" placeholder="例: SM58"></div>
+    <div class="fr"><label>総在庫数</label><input type="number" id="add-qty" min="1" value="1"></div>
+    <div class="fr"><label>備考</label><input id="add-note" placeholder="任意"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modal-add')">キャンセル</button>
+      <button class="btn btn-primary" onclick="doAdd()">追加</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal-return">
+  <div class="modal">
+    <h3><i class="ti ti-arrow-down-left"></i> 返却処理</h3>
+    <div class="fr"><label>機材</label><input id="ret-item" readonly></div>
+    <div class="fr"><label>返却数</label><input type="number" id="ret-qty" min="1" value="1"></div>
+    <div class="fr"><label>備考</label><input id="ret-note" placeholder="任意"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modal-return')">キャンセル</button>
+      <button class="btn btn-primary" onclick="doReturn()">返却確定</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal-note">
+  <div class="modal">
+    <h3><i class="ti ti-notes"></i> 備考編集</h3>
+    <div class="fr"><label>機材</label><input id="note-item" readonly></div>
+    <div class="fr"><label>備考</label><textarea id="note-text" placeholder="修理先・レンタル先・返却予定・その他メモ"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modal-note')">キャンセル</button>
+      <button class="btn btn-primary" onclick="doEditNote()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
