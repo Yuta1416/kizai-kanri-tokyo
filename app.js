@@ -205,7 +205,9 @@ async function fetchFromSpreadsheet() {
         });
       });
     }
-
+console.log('inv件数:', inv.length);
+console.log('outItems件数:', outItems.length);
+console.log('outItems内容:', JSON.stringify(outItems));
     render();
   } catch(e) {
     console.error('スプレッドシート取得エラー:', e);
