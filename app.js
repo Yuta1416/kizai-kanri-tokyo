@@ -384,9 +384,8 @@ function doCheckout() {
   history.push({date:now,project:proj,staff,model:`${item.maker} ${item.model}`,qty,action:'OUT',note:ret?`返却予定:${ret}`:''});
   closeModal('modal-checkout'); render();
 
-  // スプレッドシートにも反映（JSONP））
+  // スプレッドシートにも反映（JSONP）
   if (GAS_API_URL && GAS_API_URL !== 'ここにGASのURLを貼り付け') {
-    console.log('GAS呼び出し開始:', item.maker, item.model, qty);
     const cbName = 'cb_' + Date.now();
     const params = new URLSearchParams({
       action:     'checkout',
@@ -598,49 +597,52 @@ function handleFile(e) {
 }
 
 // ============================================================
-// スプレッドシートから在庫データを取得
+// スプレッドシートから在庫データを取得（JSONP）
 // ============================================================
-async function fetchFromSpreadsheet() {
+function fetchFromSpreadsheet() {
   if (!GAS_API_URL || GAS_API_URL === 'ここにGASのURLを貼り付け') {
     render();
     return;
   }
-  try {
-    const res = await fetch(GAS_API_URL + '?action=all');
-    if (!res.ok) throw new Error('HTTP error: ' + res.status);
-    const json = await res.json();
+  const cbName = 'gasCallback_' + Date.now();
+  window[cbName] = function(json) {
+    delete window[cbName];
+    const el = document.getElementById('jsonp_' + cbName);
+    if (el) el.remove();
 
     if (json.inventory && json.inventory.length > 0) {
       inv = json.inventory.map(function(r) {
         return {
-          cat:     r.cat     || '',
-          maker:   r.maker   || '',
-          model:   r.model   || '',
-          note:    r.note    || '',
+          cat:     String(r.cat   || ''),
+          maker:   String(r.maker || ''),
+          model:   String(r.model || ''),
+          note:    String(r.note  || ''),
           total:   parseInt(r.total) || 0,
           out:     parseInt(r.out)   || 0,
           special: 0,
-          status:  r.status  || 'IN',
+          status:  r.status || 'IN',
         };
       });
     }
 
     if (json.out && json.out.length > 0) {
       outItems = json.out
-        .filter(function(r) { return r.model && r.model !== ''; })
+        .filter(function(r) { return r.model && String(r.model) !== ''; })
         .map(function(r, i) {
+          const rModel = String(r.model || '');
           const invIdx = inv.findIndex(function(item) {
-            return r.model.includes(item.model) || item.model.includes(r.model);
+            const iModel = String(item.model || '');
+            return rModel.includes(iModel) || iModel.includes(rModel);
           });
           return {
             id:         i,
             invIdx:     invIdx >= 0 ? invIdx : 0,
-            model:      r.model      || '',
+            model:      rModel,
             qty:        parseInt(r.qty) || 0,
-            project:    r.project    || '',
-            staff:      r.staff      || '',
-            returnDate: r.dateReturn || '',
-            date:       r.date       || '',
+            project:    String(r.project    || ''),
+            staff:      String(r.staff      || ''),
+            returnDate: String(r.dateReturn || ''),
+            date:       String(r.date       || ''),
           };
         });
 
@@ -658,10 +660,18 @@ async function fetchFromSpreadsheet() {
     }
 
     render();
-  } catch(e) {
-    console.error('スプレッドシート取得エラー:', e);
+  };
+
+  const script = document.createElement('script');
+  script.id = 'jsonp_' + cbName;
+  script.src = GAS_API_URL + '?action=all&callback=' + cbName;
+  script.onerror = function() {
+    console.error('GAS接続エラー');
+    delete window[cbName];
+    script.remove();
     render();
-  }
+  };
+  document.body.appendChild(script);
 }
 
 // ============================================================
