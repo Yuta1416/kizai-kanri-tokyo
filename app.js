@@ -433,9 +433,25 @@ function doReturn() {
   item.out=Math.max(0,item.out-qty);
   const now=new Date().toLocaleString('ja-JP');
   const oi=outItems.findLastIndex(o=>o.invIdx===retIdx);
+  const project = oi>=0 ? outItems[oi].project : '';
   if(oi>=0) outItems.splice(oi,1);
   history.push({date:now,project:'',staff:'',model:`${item.maker} ${item.model}`,qty,action:'返却',note});
   closeModal('modal-return'); render();
+
+  // スプレッドシートにも反映（JSONP）
+  if (GAS_API_URL && GAS_API_URL !== 'ここにGASのURLを貼り付け' && project) {
+    const cbName3 = 'cb_' + Date.now();
+    window[cbName3] = function(json) {
+      delete window[cbName3];
+      const el3 = document.getElementById('jsonp_' + cbName3);
+      if (el3) el3.remove();
+      if (json.status === 'ok') console.log('返却処理完了');
+    };
+    const script3 = document.createElement('script');
+    script3.id = 'jsonp_' + cbName3;
+    script3.src = GAS_API_URL + '?action=return&project=' + encodeURIComponent(project) + '&callback=' + cbName3;
+    document.body.appendChild(script3);
+  }
 }
 
 function openSpecial(idx) {
