@@ -336,6 +336,8 @@ function bulkReturn(project, e) {
   e.stopPropagation();
   if (!confirm(`「${project}」の機材を全て返却しますか？`)) return;
   const now = new Date().toLocaleString('ja-JP');
+
+  // アプリ内のデータを更新
   outItems.filter(o => (o.project||'（案件名未入力）') === project).forEach(o => {
     if (o.invIdx >= 0 && o.invIdx < inv.length) {
       inv[o.invIdx].out = Math.max(0, inv[o.invIdx].out - o.qty);
@@ -345,6 +347,19 @@ function bulkReturn(project, e) {
   for (let i = outItems.length-1; i >= 0; i--) {
     if ((outItems[i].project||'（案件名未入力）') === project) outItems.splice(i,1);
   }
+
+  // スプレッドシートにも反映
+  if (GAS_API_URL && GAS_API_URL !== 'ここにGASのURLを貼り付け') {
+    fetch(GAS_API_URL + '?action=return&project=' + encodeURIComponent(project))
+      .then(res => res.json())
+      .then(json => {
+        if (json.status === 'ok') {
+          console.log('返却処理完了:', project);
+        }
+      })
+      .catch(err => console.error('返却API エラー:', err));
+  }
+
   render();
 }
 
