@@ -384,8 +384,9 @@ function doCheckout() {
   history.push({date:now,project:proj,staff,model:`${item.maker} ${item.model}`,qty,action:'OUT',note:ret?`返却予定:${ret}`:''});
   closeModal('modal-checkout'); render();
 
-  // スプレッドシートにも反映（JSONP）
+  // スプレッドシートにも反映（JSONP））
   if (GAS_API_URL && GAS_API_URL !== 'ここにGASのURLを貼り付け') {
+    console.log('GAS呼び出し開始:', item.maker, item.model, qty);
     const cbName = 'cb_' + Date.now();
     const params = new URLSearchParams({
       action:     'checkout',
