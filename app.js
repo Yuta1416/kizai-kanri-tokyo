@@ -1,4 +1,4 @@
-const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbzYFcCl9VSZVF3eyuxBlGpxCtYH1G4Nmnt22WgfBAsNR1iLjOWeK4NufAszBPKvxDKC/exec';
+const GAS_API_URL = 'ここにGASのURLを貼り付け';
 
 const SC = {
   'IN':        {cls:'s-in',    icon:'ti-circle-check'},
@@ -132,7 +132,7 @@ const RAW = [
 let inv = RAW.map(c => ({cat:c[0],maker:c[1],model:c[2],total:c[3],out:0,special:0,status:'IN',note:c[4]||''}));
 let outItems = [], history = [];
 let currentTab = 'all';
-let coIdx=-1, retIdx=-1, spIdx=-1, noteIdx=-1;
+let coIdx=-1, retIdx=-1, retOutIdx=-1, spIdx=-1, noteIdx=-1;
 
 function calcSt(item) {
   if (['修理中','レンタル中','長期不在'].includes(item.status) && item.special > 0) return item.status;
@@ -419,7 +419,7 @@ function openReturn(idx) {
   openModal('modal-return');
 }
 function openReturnFromOut(oi) {
-  const o=outItems[oi]; retIdx=o.invIdx;
+  const o=outItems[oi]; retIdx=o.invIdx; retOutIdx=oi;
   document.getElementById('ret-item').value=o.model;
   document.getElementById('ret-qty').value=o.qty;
   document.getElementById('ret-qty').max=o.qty;
@@ -432,9 +432,13 @@ function doReturn() {
   if(qty<1||qty>item.out){alert('数量が無効です');return;}
   item.out=Math.max(0,item.out-qty);
   const now=new Date().toLocaleString('ja-JP');
-  const oi=outItems.findLastIndex(o=>o.invIdx===retIdx);
+  // retOutIdxがあればそのoutItemsのプロジェクトを使う
+  const oi = (typeof retOutIdx !== 'undefined' && retOutIdx >= 0 && retOutIdx < outItems.length)
+    ? retOutIdx
+    : outItems.findLastIndex(o=>o.invIdx===retIdx);
   const project = oi>=0 ? (outItems[oi].project || '') : '';
   if(oi>=0) outItems.splice(oi,1);
+  retOutIdx = -1;
   history.push({date:now,project:project,staff:'',model:`${item.maker} ${item.model}`,qty,action:'返却',note});
   closeModal('modal-return'); render();
 
@@ -471,11 +475,52 @@ function doSpecial() {
   const now=new Date().toLocaleString('ja-JP');
   history.push({date:now,project:'',staff:'',model:`${item.maker} ${item.model}`,qty,action:status,note});
   closeModal('modal-special'); render();
+
+  // スプレッドシートにも反映（JSONP）
+  if (GAS_API_URL && GAS_API_URL !== 'ここにGASのURLを貼り付け') {
+    const cbSp = 'cb_' + Date.now();
+    const params = new URLSearchParams({
+      action: 'special',
+      model:  item.maker + ' ' + item.model,
+      status: status,
+      qty:    qty,
+      note:   note || '',
+      callback: cbSp,
+    });
+    window[cbSp] = function(json) {
+      delete window[cbSp];
+      const el = document.getElementById('jsonp_' + cbSp);
+      if (el) el.remove();
+    };
+    const script = document.createElement('script');
+    script.id = 'jsonp_' + cbSp;
+    script.src = GAS_API_URL + '?' + params.toString();
+    document.body.appendChild(script);
+  }
 }
 function resolveSpecial(idx) {
   const item=inv[idx], now=new Date().toLocaleString('ja-JP');
   history.push({date:now,project:'',staff:'',model:`${item.maker} ${item.model}`,qty:item.special,action:'復帰',note:item.note});
   item.special=0; item.status='IN'; render();
+
+  // スプレッドシートにも反映（JSONP）
+  if (GAS_API_URL && GAS_API_URL !== 'ここにGASのURLを貼り付け') {
+    const cbRes = 'cb_' + Date.now();
+    const params = new URLSearchParams({
+      action:   'resolve',
+      model:    item.maker + ' ' + item.model,
+      callback: cbRes,
+    });
+    window[cbRes] = function(json) {
+      delete window[cbRes];
+      const el = document.getElementById('jsonp_' + cbRes);
+      if (el) el.remove();
+    };
+    const script = document.createElement('script');
+    script.id = 'jsonp_' + cbRes;
+    script.src = GAS_API_URL + '?' + params.toString();
+    document.body.appendChild(script);
+  }
 }
 
 function openNoteModal(idx) {
