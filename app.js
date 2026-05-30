@@ -1,4 +1,5 @@
-const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbzYFcCl9VSZVF3eyuxBlGpxCtYH1G4Nmnt22WgfBAsNR1iLjOWeK4NufAszBPKvxDKC/exec';
+const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbzYFcCl9VSZVF3eyuxBlGpxCtYH1G4Nmnt22WgfBAsNR1iLjOWeK4NufAszBPKvxDKC/exec
+  ';
 
 const SC = {
   'IN':        {cls:'s-in',    icon:'ti-circle-check'},
@@ -154,11 +155,7 @@ function render() {
   if (currentTab === 'out')       renderOut();
   if (currentTab === 'special')   renderSpecial();
   if (currentTab === 'history')   renderHistory();
-  } catch(e) {
-    console.error('スプレッドシート取得エラー:', e);
-    render();
-    if (currentTab === 'dashboard') renderDashboard();
-  }
+  if (currentTab === 'dashboard') renderDashboard();
 }
 
 function renderStats() {
@@ -857,6 +854,7 @@ function fetchFromSpreadsheet() {
     }
 
     render();
+    if (currentTab === 'dashboard') renderDashboard();
   };
 
   const script = document.createElement('script');
