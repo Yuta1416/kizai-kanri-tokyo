@@ -154,7 +154,11 @@ function render() {
   if (currentTab === 'out')       renderOut();
   if (currentTab === 'special')   renderSpecial();
   if (currentTab === 'history')   renderHistory();
-  if (currentTab === 'dashboard') renderDashboard();
+  } catch(e) {
+    console.error('スプレッドシート取得エラー:', e);
+    render();
+    if (currentTab === 'dashboard') renderDashboard();
+  }
 }
 
 function renderStats() {
