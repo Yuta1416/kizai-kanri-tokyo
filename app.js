@@ -150,10 +150,11 @@ function badge(st) {
 function render() {
   renderStats();
   renderCats();
-  if (currentTab === 'all')     renderInventory();
-  if (currentTab === 'out')     renderOut();
-  if (currentTab === 'special') renderSpecial();
-  if (currentTab === 'history') renderHistory();
+  if (currentTab === 'all')       renderInventory();
+  if (currentTab === 'out')       renderOut();
+  if (currentTab === 'special')   renderSpecial();
+  if (currentTab === 'history')   renderHistory();
+  if (currentTab === 'dashboard') renderDashboard();
 }
 
 function renderStats() {
@@ -355,10 +356,11 @@ function switchTab(tab, el) {
   currentTab = tab;
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
   el.classList.add('on');
-  ['all','out','special','history'].forEach(t => {
+  ['all','out','special','history','dashboard'].forEach(t => {
     document.getElementById('view-'+t).style.display = t===tab ? 'block' : 'none';
   });
   render();
+  if (tab === 'dashboard') renderDashboard();
 }
 
 function toggleGroup(head) {
@@ -798,6 +800,122 @@ function fetchFromSpreadsheet() {
     render();
   };
   document.body.appendChild(script);
+}
+
+
+// ============================================================
+// ダッシュボード（カレンダー＋レポート）
+// ============================================================
+function renderDashboard() {
+  const container = document.getElementById('dashboard-container');
+  if (!container) return;
+
+  // カレンダーデータ作成
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+
+  // 持ち出し中の案件を日付マップに
+  const dateMap = {};
+  outItems.forEach(o => {
+    if (!o.dateOut && !o.date) return;
+    try {
+      const d = new Date(o.date || o.dateOut);
+      if (!isNaN(d)) {
+        const key = d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
+        if (!dateMap[key]) dateMap[key] = [];
+        dateMap[key].push(o.project || '（案件名未入力）');
+      }
+    } catch(e) {}
+    // 返却予定日も表示
+    if (o.returnDate) {
+      try {
+        const rd = new Date(o.returnDate);
+        if (!isNaN(rd)) {
+          const rkey = rd.getFullYear() + '-' + (rd.getMonth()+1) + '-' + rd.getDate();
+          if (!dateMap[rkey]) dateMap[rkey] = [];
+          if (!dateMap[rkey].includes('返却: ' + (o.project||'未入力'))) {
+            dateMap[rkey].push('返却: ' + (o.project || '未入力'));
+          }
+        }
+      } catch(e) {}
+    }
+  });
+
+  // 使用頻度集計（historyから）
+  const freq = {};
+  history.forEach(h => {
+    if (h.action === 'OUT' || h.action === '持ち出し中') {
+      const key = h.model;
+      freq[key] = (freq[key] || 0) + (parseInt(h.qty) || 1);
+    }
+  });
+  const top10 = Object.entries(freq)
+    .sort((a,b) => b[1]-a[1])
+    .slice(0, 10);
+  const maxFreq = top10.length ? top10[0][1] : 1;
+
+  const monthNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+  const dayNames = ['日','月','火','水','木','金','土'];
+
+  // カレンダーHTML
+  let calCells = '';
+  dayNames.forEach(d => {
+    calCells += `<div class="cal-head">${d}</div>`;
+  });
+  for (let i = 0; i < (firstDay === 0 ? 6 : firstDay-1); i++) {
+    calCells += `<div class="cal-cell empty"></div>`;
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    const key = year + '-' + (month+1) + '-' + d;
+    const events = dateMap[key] || [];
+    const isToday = d === now.getDate() && month === now.getMonth() && year === now.getFullYear();
+    const eventDots = events.slice(0,2).map(e =>
+      `<div class="cal-event${e.startsWith('返却') ? ' ret' : ''}">${e.length > 8 ? e.slice(0,8)+'…' : e}</div>`
+    ).join('');
+    calCells += `<div class="cal-cell${isToday ? ' today' : ''}${events.length ? ' has-event' : ''}">
+      <span class="cal-day">${d}</span>
+      ${eventDots}
+    </div>`;
+  }
+
+  // レポートHTML
+  const reportRows = top10.length ? top10.map(([model, count], i) => {
+    const pct = Math.round(count / maxFreq * 100);
+    return `<div class="rep-row">
+      <span class="rep-rank">${i+1}</span>
+      <span class="rep-name">${model}</span>
+      <div class="rep-bar-wrap">
+        <div class="rep-bar" style="width:${pct}%"></div>
+      </div>
+      <span class="rep-count">${count}回</span>
+    </div>`;
+  }).join('') : `<div style="text-align:center;padding:2rem;color:var(--text2);font-size:13px">履歴データがありません</div>`;
+
+  container.innerHTML = `
+    <div class="dash-grid">
+      <div class="dash-card">
+        <div class="dash-card-head">
+          <i class="ti ti-calendar" aria-hidden="true"></i>
+          <span>${year}年${monthNames[month]} 案件カレンダー</span>
+        </div>
+        <div class="cal-grid">${calCells}</div>
+        <div class="cal-legend">
+          <span class="cal-event">持ち出し</span>
+          <span class="cal-event ret">返却予定</span>
+        </div>
+      </div>
+      <div class="dash-card">
+        <div class="dash-card-head">
+          <i class="ti ti-chart-bar" aria-hidden="true"></i>
+          <span>使用頻度 TOP${top10.length}</span>
+        </div>
+        <div class="rep-list">${reportRows}</div>
+      </div>
+    </div>
+  `;
 }
 
 // ============================================================
