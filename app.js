@@ -1,4 +1,4 @@
-const GAS_API_URL = 'ここにGASのURLを貼り付け';
+const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbzYFcCl9VSZVF3eyuxBlGpxCtYH1G4Nmnt22WgfBAsNR1iLjOWeK4NufAszBPKvxDKC/exec';
 
 const SC = {
   'IN':        {cls:'s-in',    icon:'ti-circle-check'},
@@ -673,15 +673,22 @@ function fetchFromSpreadsheet() {
 
     if (json.inventory && json.inventory.length > 0) {
       inv = json.inventory.map(function(r) {
+        const total  = parseInt(r.total) || 0;
+        const stock  = parseInt(r.stock) || 0;
+        const out    = parseInt(r.out)   || 0;
+        const status = String(r.status || 'IN');
+        // 修理中・レンタル中・長期不在の場合はspecialを計算
+        const isSpecial = ['修理中','レンタル中','長期不在'].includes(status);
+        const special = isSpecial ? Math.max(0, total - stock - out) : 0;
         return {
           cat:     String(r.cat   || ''),
           maker:   String(r.maker || ''),
           model:   String(r.model || ''),
           note:    String(r.note  || ''),
-          total:   parseInt(r.total) || 0,
-          out:     parseInt(r.out)   || 0,
-          special: 0,
-          status:  r.status || 'IN',
+          total:   total,
+          out:     out,
+          special: special,
+          status:  status,
         };
       });
     }
