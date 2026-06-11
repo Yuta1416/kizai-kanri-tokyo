@@ -1145,6 +1145,16 @@ function checkAutoReturn() {
   render();
 }
 
+function reloadData() {
+  const btn = document.getElementById('reload-btn');
+  if (btn) { btn.disabled = true; btn.querySelector('i').classList.add('spin-icon'); }
+  showLoading(true);
+  fetchFromSpreadsheet();
+  setTimeout(() => {
+    if (btn) { btn.disabled = false; btn.querySelector('i').classList.remove('spin-icon'); }
+  }, 1500);
+}
+
 // 起動時
 showLoading(true);
 fetchFromSpreadsheet();
