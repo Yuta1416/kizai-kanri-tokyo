@@ -308,6 +308,9 @@ function renderOut() {
           </div>
           <div class="proj-group-right">
             <span class="proj-count">${g.items.length}品目</span>
+            <button class="act" onclick="downloadPickupList(event)" style="font-size:11px">
+              <i class="ti ti-file-download"></i> DL
+            </button>
             <button class="act btn-bulk-return" onclick="bulkReturn('${project}',event)">
               <i class="ti ti-rotate"></i> 一括返却
             </button>
