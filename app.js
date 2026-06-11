@@ -465,6 +465,9 @@ function bulkReturn(project, e) {
       const el2 = document.getElementById('jsonp_' + cbName2);
       if (el2) el2.remove();
       if (json.status === 'ok') {
+        if (json.updated === 0) {
+          alert('⚠️ スプレッドシートで該当案件が見つかりませんでした。\n案件名: ' + json.project);
+        }
         localStorage.removeItem(CACHE_KEY);
         fetchFromSpreadsheet();
       } else {
