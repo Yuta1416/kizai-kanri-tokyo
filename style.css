@@ -106,7 +106,7 @@ tr:hover td { background: var(--bg3); }
 /* ===== カード型レイアウト ===== */
 .inv-layout { display: grid; grid-template-columns: 160px 1fr; gap: 14px; align-items: start; }
 
-.cat-sidebar { background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 8px; position: sticky; top: 16px; }
+.cat-sidebar { background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 8px; position: sticky; top: 16px; align-self: start; max-height: calc(100vh - 32px); overflow-y: auto; }
 .cat-sidebar-item { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-radius: var(--radius); font-size: 12px; color: var(--text2); cursor: pointer; gap: 6px; }
 .cat-sidebar-item:hover { background: var(--bg3); color: var(--text); }
 .cat-sidebar-item.on { background: var(--bg3); color: var(--text); font-weight: 500; }

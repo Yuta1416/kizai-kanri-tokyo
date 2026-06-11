@@ -147,6 +147,10 @@ function badge(st) {
   return `<span class="badge ${c.cls}"><i class="ti ${c.icon}"></i>${st}</span>`;
 }
 
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 function render() {
   renderStats();
   renderCats();
@@ -234,8 +238,8 @@ function renderInventory() {
         <div class="item-card ${cls}" onclick="openItemDetail(${idx})">
           <div class="item-card-icon"><i class="ti ${icon}" aria-hidden="true"></i></div>
           <div class="item-card-info">
-            <div class="item-card-name">${item.model}</div>
-            <div class="item-card-maker">${item.maker}</div>
+            <div class="item-card-name">${escHtml(item.model)}</div>
+            <div class="item-card-maker">${escHtml(item.maker)}</div>
             ${badge(st)}
           </div>
           <div class="item-card-right">
