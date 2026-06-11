@@ -940,19 +940,41 @@ function fetchFromSpreadsheet() {
 // ============================================================
 // ダッシュボード（カレンダー＋レポート）
 // ============================================================
+let calOffset = 0; // 今月からの月オフセット
+
+function changeCalMonth(delta) {
+  calOffset = Math.max(-6, Math.min(6, calOffset + delta));
+  renderDashboard();
+}
+
 function renderDashboard() {
   const container = document.getElementById('dashboard-container');
   if (!container) return;
 
   // カレンダーデータ作成
   const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
+  const base = new Date(now.getFullYear(), now.getMonth() + calOffset, 1);
+  const year = base.getFullYear();
+  const month = base.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month+1, 0).getDate();
 
-  // 持ち出し中の案件を日付マップに
+  // 案件を日付マップに（持ち出し中＋履歴）
   const dateMap = {};
+  const addToMap = (dateStr, label, isRet) => {
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d)) return;
+      const key = d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
+      if (!dateMap[key]) dateMap[key] = [];
+      const entry = isRet ? '返却: ' + label : label;
+      if (!dateMap[key].includes(entry)) dateMap[key].push(entry);
+    } catch(e) {}
+  };
+  history.forEach(h => {
+    if (!h.project) return;
+    addToMap(h.date, h.project, false);
+  });
   outItems.forEach(o => {
     if (!o.dateOut && !o.date) return;
     try {
@@ -1039,9 +1061,17 @@ function renderDashboard() {
   container.innerHTML = `
     <div class="dash-grid">
       <div class="dash-card">
-        <div class="dash-card-head">
-          <i class="ti ti-calendar" aria-hidden="true"></i>
-          <span>${year}年${monthNames[month]} 案件カレンダー</span>
+        <div class="dash-card-head" style="justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:8px">
+            <i class="ti ti-calendar" aria-hidden="true"></i>
+            <span>${year}年${monthNames[month]}</span>
+            ${calOffset !== 0 ? `<span style="font-size:11px;color:var(--text3)">(今月から${calOffset > 0 ? '+' : ''}${calOffset}ヶ月)</span>` : ''}
+          </div>
+          <div style="display:flex;gap:4px">
+            <button class="btn" style="padding:4px 8px" onclick="changeCalMonth(-1)" ${calOffset <= -6 ? 'disabled' : ''}><i class="ti ti-chevron-left"></i></button>
+            ${calOffset !== 0 ? `<button class="btn" style="padding:4px 8px;font-size:11px" onclick="calOffset=0;renderDashboard()">今月</button>` : ''}
+            <button class="btn" style="padding:4px 8px" onclick="changeCalMonth(1)" ${calOffset >= 6 ? 'disabled' : ''}><i class="ti ti-chevron-right"></i></button>
+          </div>
         </div>
         <div class="cal-grid">${calCells}</div>
         <div class="cal-legend">
