@@ -1,4 +1,4 @@
-const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbw6nBmmOJuJs6BsrIoZYEBCWuGaTq7xWt-PJFv-dwknYC5RkNWWxaB1J41A2oAb7qZ2/exec';
+const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbwAs8vK02xMhGEcqlKcHNxAbUDqSplrYoWuybKsn-kXn0smZmYfPYJN4xOqZxHmxP0R/exec';
 
 const SC = {
   'IN':        {cls:'s-in',    icon:'ti-circle-check'},
@@ -308,7 +308,7 @@ function renderOut() {
           </div>
           <div class="proj-group-right">
             <span class="proj-count">${g.items.length}品目</span>
-            <button class="act" onclick="downloadPickupList(event)" style="font-size:11px">
+            <button class="act" onclick="downloadPickupList('${project}',event)" style="font-size:11px">
               <i class="ti ti-file-download"></i> DL
             </button>
             <button class="act btn-bulk-return" onclick="bulkReturn('${project}',event)">
@@ -1148,15 +1148,13 @@ function checkAutoReturn() {
   render();
 }
 
-function downloadPickupList() {
-  const btn = document.getElementById('pickup-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '取得中...'; }
+function downloadPickupList(project, event) {
+  if (event) event.stopPropagation();
   const cbName = 'pickupCallback_' + Date.now();
   window[cbName] = function(json) {
     delete window[cbName];
     const el = document.getElementById('jsonp_' + cbName);
     if (el) el.remove();
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-file-download"></i> 持ち出しリスト'; }
     if (json.status !== 'ok') { alert('取得失敗: ' + (json.message || 'エラー')); return; }
     const bytes = Uint8Array.from(atob(json.data), c => c.charCodeAt(0));
     const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -1168,10 +1166,10 @@ function downloadPickupList() {
   };
   const script = document.createElement('script');
   script.id = 'jsonp_' + cbName;
-  script.src = GAS_API_URL + '?action=pickuplist&callback=' + cbName;
+  const projectParam = project ? '&project=' + encodeURIComponent(project) : '';
+  script.src = GAS_API_URL + '?action=pickuplist&callback=' + cbName + projectParam;
   script.onerror = function() {
     delete window[cbName]; script.remove();
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-file-download"></i> 持ち出しリスト'; }
     alert('取得に失敗しました');
   };
   document.body.appendChild(script);
