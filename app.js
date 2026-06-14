@@ -680,6 +680,17 @@ function doAdd() {
   const qty=parseInt(document.getElementById('add-qty').value)||0;
   const note=document.getElementById('add-note').value.trim();
   if(!model||qty<1){alert('型番と数量は必須です');return;}
+
+  // 同じ型番が既にあれば在庫数を増やす
+  const existing = inv.find(i => i.model === model);
+  if (existing) {
+    if (!confirm(`「${model}」は既に登録済みです。\n在庫数を${existing.total}→${existing.total+qty}に増やしますか？`)) return;
+    existing.total += qty;
+    existing.status = existing.out >= existing.total ? 'OUT' : existing.out > 0 ? 'PARTIAL' : 'IN';
+    closeModal('modal-add'); render();
+    return;
+  }
+
   inv.push({cat:cat||'その他',maker:maker||'—',model,total:qty,out:0,special:0,status:'IN',note});
   closeModal('modal-add'); render();
 }
