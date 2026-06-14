@@ -1,4 +1,4 @@
-const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxC5IhccXuVrCH7kUzLvoocVYZMlCrXdBUMrcZ1KqdmymdMRPfNPbcV99nuZ9ywZHm_/exec';
+const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbyieP11NMlZRJGrd09U2mXxnR7mAd1SMQgeIbaPW6aJPoxlKDFQ3jGp5uj4v47xWTXl/exec';
 
 const SC = {
   'IN':        {cls:'s-in',    icon:'ti-circle-check'},
@@ -1067,15 +1067,8 @@ function renderDashboard() {
     }
   });
 
-  // 使用頻度集計（historyから）
-  const freq = {};
-  history.forEach(h => {
-    if (h.action === 'OUT' || h.action === '持ち出し中') {
-      const key = h.model;
-      freq[key] = (freq[key] || 0) + (parseInt(h.qty) || 1);
-    }
-  });
-  const top10 = Object.entries(freq)
+  // 在庫不足ランキング（shortageDataから）
+  const top10 = Object.entries(shortageData)
     .sort((a,b) => b[1]-a[1])
     .slice(0, 10);
   const maxFreq = top10.length ? top10[0][1] : 1;
@@ -1118,7 +1111,7 @@ function renderDashboard() {
       </div>
       <span class="rep-count">${count}回</span>
     </div>`;
-  }).join('') : `<div style="text-align:center;padding:2rem;color:var(--text2);font-size:13px">履歴データがありません</div>`;
+  }).join('') : `<div style="text-align:center;padding:2rem;color:var(--text2);font-size:13px">在庫不足の記録がありません</div>`;
 
   container.innerHTML = `
     <div class="dash-grid">
@@ -1144,7 +1137,7 @@ function renderDashboard() {
       <div class="dash-card">
         <div class="dash-card-head">
           <i class="ti ti-chart-bar" aria-hidden="true"></i>
-          <span>使用頻度 TOP${top10.length}</span>
+          <span>在庫不足 TOP${top10.length}</span>
         </div>
         <div class="rep-list">${reportRows}</div>
       </div>
@@ -1200,6 +1193,24 @@ function downloadPickupList(project, event) {
 }
 
 let reservations = [];
+let shortageData = {};
+
+function fetchShortageLog() {
+  if (!GAS_API_URL || GAS_API_URL === 'ここにGASのURLを貼り付け') return;
+  const cbName = 'shortageCb_' + Date.now();
+  window[cbName] = function(json) {
+    delete window[cbName];
+    document.getElementById('jsonp_'+cbName)?.remove();
+    if (json.shortage) {
+      shortageData = json.shortage;
+      if (currentTab === 'dashboard') renderDashboard();
+    }
+  };
+  const script = document.createElement('script');
+  script.id = 'jsonp_' + cbName;
+  script.src = GAS_API_URL + '?action=shortage_log&callback=' + cbName;
+  document.body.appendChild(script);
+}
 
 function renderReservations() {
   const container = document.getElementById('reserve-container');
@@ -1286,6 +1297,7 @@ function reloadData() {
 showLoading(true);
 fetchFromSpreadsheet();
 fetchReservations();
+fetchShortageLog();
 // 5分ごとに自動更新
 setInterval(fetchFromSpreadsheet, 300000);
 setInterval(checkAutoReturn, 60000);
