@@ -1,4 +1,4 @@
-const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbx9N36o72wg0TbP6ANniAvlACmuuejT2KAYUoVGDmIPHVdLtZa3japTLv0UzOaTG6nh/exec';
+const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbwl31TsEFHcj2s2Gw6awn-2OxdGQbYVFk4LkrcE6gKyo6NzxGL8THGPL7MqfKvvbVFX/exec';
 
 const SC = {
   'IN':        {cls:'s-in',    icon:'ti-circle-check'},
@@ -157,6 +157,7 @@ function render() {
   if (currentTab === 'all')       renderInventory();
   if (currentTab === 'out')       renderOut();
   if (currentTab === 'special')   renderSpecial();
+  if (currentTab === 'reserve')   renderReservations();
   if (currentTab === 'history')   renderHistory();
   if (currentTab === 'dashboard') renderDashboard();
 }
@@ -427,7 +428,7 @@ function switchTab(tab, el) {
   currentTab = tab;
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
   el.classList.add('on');
-  ['all','out','special','history','dashboard'].forEach(t => {
+  ['all','out','special','reserve','history','dashboard'].forEach(t => {
     document.getElementById('view-'+t).style.display = t===tab ? 'block' : 'none';
   });
   render();
@@ -1187,6 +1188,79 @@ function downloadPickupList(project, event) {
   document.body.appendChild(script);
 }
 
+let reservations = [];
+
+function renderReservations() {
+  const container = document.getElementById('reserve-container');
+  if (!reservations.length) {
+    container.innerHTML = '<div class="empty">予約中の機材はありません</div>';
+    return;
+  }
+  const groups = {};
+  reservations.forEach(r => {
+    const key = r.project || '（案件名未入力）';
+    if (!groups[key]) groups[key] = { items: [], staff: r.staff, dateOut: r.dateOut, dateReturn: r.dateReturn };
+    groups[key].items.push(r);
+  });
+  container.innerHTML = Object.entries(groups).map(([project, g]) => {
+    const rows = g.items.map(r => `
+      <div class="proj-item-row">
+        <span class="proj-item-name">${escHtml(r.model)}</span>
+        <span class="proj-item-qty">×${r.qty}</span>
+      </div>`).join('');
+    return `
+      <div class="proj-group">
+        <div class="proj-group-head" onclick="toggleGroup(this)">
+          <div class="proj-group-left">
+            <i class="ti ti-chevron-down proj-chevron"></i>
+            <span class="proj-group-name">${escHtml(project)}</span>
+            <span class="proj-group-meta">${escHtml(g.staff||'担当未入力')}</span>
+            <span class="badge s-info" style="font-size:10px"><i class="ti ti-calendar"></i> 搬入 ${escHtml(g.dateOut)}</span>
+          </div>
+          <div class="proj-group-right">
+            <span class="proj-count">${g.items.length}品目</span>
+            <button class="act" style="color:var(--danger-text)" onclick="cancelReservation('${project.replace(/'/g,"\\'")}',event)">
+              <i class="ti ti-x"></i> キャンセル
+            </button>
+          </div>
+        </div>
+        <div class="proj-group-body">${rows}</div>
+      </div>`;
+  }).join('');
+}
+
+function cancelReservation(project, e) {
+  e.stopPropagation();
+  if (!confirm(`「${project}」の予約をキャンセルしますか？`)) return;
+  reservations = reservations.filter(r => (r.project || '（案件名未入力）') !== project);
+  renderReservations();
+  if (GAS_API_URL && GAS_API_URL !== 'ここにGASのURLを貼り付け') {
+    const cbName = 'cancelCb_' + Date.now();
+    window[cbName] = function(json) { delete window[cbName]; document.getElementById('jsonp_'+cbName)?.remove(); };
+    const script = document.createElement('script');
+    script.id = 'jsonp_' + cbName;
+    script.src = GAS_API_URL + '?action=cancel_reservation&project=' + encodeURIComponent(project) + '&callback=' + cbName;
+    document.body.appendChild(script);
+  }
+}
+
+function fetchReservations() {
+  if (!GAS_API_URL || GAS_API_URL === 'ここにGASのURLを貼り付け') return;
+  const cbName = 'resCb_' + Date.now();
+  window[cbName] = function(json) {
+    delete window[cbName];
+    document.getElementById('jsonp_'+cbName)?.remove();
+    if (json.reservations) {
+      reservations = json.reservations;
+      if (currentTab === 'reserve') renderReservations();
+    }
+  };
+  const script = document.createElement('script');
+  script.id = 'jsonp_' + cbName;
+  script.src = GAS_API_URL + '?action=reservations&callback=' + cbName;
+  document.body.appendChild(script);
+}
+
 function reloadData() {
   const btn = document.getElementById('reload-btn');
   if (btn) { btn.disabled = true; btn.querySelector('i').classList.add('spin-icon'); }
@@ -1200,6 +1274,7 @@ function reloadData() {
 // 起動時
 showLoading(true);
 fetchFromSpreadsheet();
+fetchReservations();
 // 5分ごとに自動更新
 setInterval(fetchFromSpreadsheet, 300000);
 setInterval(checkAutoReturn, 60000);
