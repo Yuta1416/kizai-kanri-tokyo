@@ -1,4 +1,4 @@
-const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbwkfUKAtuoODtplMF8utX3tQLgXOwXWeCBhn-avVLeCVB81lY0jrWb89yCO85jT8dA/exec';
+const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbyuqjQ9vrxmsizquAIBreK1mG6L_hiGA-BHCI3MiIEM5Sz3SYTvj0050MfEL_c6vpnF/exec';
 
 const SC = {
   'IN':        {cls:'s-in',    icon:'ti-circle-check'},
