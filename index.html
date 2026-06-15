@@ -52,7 +52,8 @@
   </div>
 
   <nav class="tab-bar">
-    <button class="tab on" onclick="switchTab('all',this)">すべて</button>
+    <button class="tab on" onclick="switchTab('all',this)">ホーム</button>
+    <button class="tab" onclick="switchTab('inventory',this)">在庫</button>
     <button class="tab" onclick="switchTab('out',this)">持ち出し中</button>
     <button class="tab" onclick="switchTab('special',this)">修理・レンタル・不在</button>
     <button class="tab" onclick="switchTab('reserve',this)">持ち出し予約</button>
@@ -61,6 +62,26 @@
   </nav>
 
   <div id="view-all">
+    <div class="top-layout">
+      <div class="top-left" id="top-calendar"></div>
+      <div class="top-right">
+        <div class="dash-card">
+          <div class="dash-card-head" style="justify-content:space-between">
+            <div style="display:flex;align-items:center;gap:8px">
+              <i class="ti ti-calendar-event" aria-hidden="true"></i>
+              <span id="shift-filename">シフト</span>
+            </div>
+            <button class="btn" style="padding:4px 8px;font-size:11px" onclick="fetchShiftFile()"><i class="ti ti-refresh"></i> 更新</button>
+          </div>
+          <div id="shift-content" style="overflow:auto;max-height:calc(100vh - 160px);padding:8px">
+            <div style="text-align:center;padding:2rem;color:var(--text2);font-size:13px">読み込み中...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="view-inventory" style="display:none">
     <div class="controls">
       <input type="text" id="srch" placeholder="検索（機材名・メーカー・備考）" oninput="render()">
       <select id="stF" onchange="render()">

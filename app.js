@@ -1,4 +1,4 @@
-const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxJQc99McxqCmlRR0SWe1K9jJZcvMO4DiKLq4S1NGAcVKs40s0kOc6Ro4tQr5O0CNRZ/exec';
+const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbwkfUKAtuoODtplMF8utX3tQLgXOwXWeCBhn-avVLeCVB81lY0jrWb89yCO85jT8dA/exec';
 
 const SC = {
   'IN':        {cls:'s-in',    icon:'ti-circle-check'},
@@ -154,7 +154,8 @@ function escHtml(s) {
 function render() {
   renderStats();
   renderCats();
-  if (currentTab === 'all')       renderInventory();
+  if (currentTab === 'all')       renderTopPage();
+  if (currentTab === 'inventory') renderInventory();
   if (currentTab === 'out')       renderOut();
   if (currentTab === 'special')   renderSpecial();
   if (currentTab === 'reserve')   renderReservations();
@@ -428,11 +429,13 @@ function switchTab(tab, el) {
   currentTab = tab;
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
   el.classList.add('on');
-  ['all','out','special','reserve','history','dashboard'].forEach(t => {
-    document.getElementById('view-'+t).style.display = t===tab ? 'block' : 'none';
+  ['all','inventory','out','special','reserve','history','dashboard'].forEach(t => {
+    const v = document.getElementById('view-'+t);
+    if (v) v.style.display = t===tab ? 'block' : 'none';
   });
   render();
   if (tab === 'dashboard') renderDashboard();
+  if (tab === 'all') renderTopPage();
 }
 
 function toggleGroup(head) {
@@ -969,6 +972,7 @@ function fetchFromSpreadsheet() {
     showLoading(false);
     document.getElementById('cache-banner').classList.add('show');
   }
+  fetchShiftFile();
 
   const cbName = 'gasCallback_' + Date.now();
   window[cbName] = function(json) {
@@ -1006,7 +1010,8 @@ let calOffset = 0; // 今月からの月オフセット
 
 function changeCalMonth(delta) {
   calOffset = Math.max(-6, Math.min(6, calOffset + delta));
-  renderDashboard();
+  if (currentTab === 'all') renderTopPage();
+  else renderDashboard();
 }
 
 function renderDashboard() {
@@ -1194,6 +1199,131 @@ function downloadPickupList(project, event) {
 
 let reservations = [];
 let shortageData = {};
+
+// ============================================================
+// シフトExcel取得・表示
+// ============================================================
+function fetchShiftFile() {
+  if (!GAS_API_URL || GAS_API_URL === 'ここにGASのURLを貼り付け') return;
+  const cbName = 'shiftCb_' + Date.now();
+  window[cbName] = function(json) {
+    delete window[cbName];
+    document.getElementById('jsonp_'+cbName)?.remove();
+    const content = document.getElementById('shift-content');
+    if (!content) return;
+    if (json.status !== 'ok') {
+      content.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text2);font-size:13px">ファイルが見つかりません: ' + escHtml(json.message||'エラー') + '</div>';
+      return;
+    }
+    const fname = document.getElementById('shift-filename');
+    if (fname) fname.textContent = json.filename || 'シフト';
+    const bytes = Uint8Array.from(atob(json.data), c => c.charCodeAt(0));
+    const wb = XLSX.read(bytes, {type:'array'});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const html = XLSX.utils.sheet_to_html(ws, {editable: false});
+    content.innerHTML = '<div class="shift-table-wrap">' + html + '</div>';
+  };
+  const script = document.createElement('script');
+  script.id = 'jsonp_' + cbName;
+  script.src = GAS_API_URL + '?action=shift_file&callback=' + cbName;
+  script.onerror = function() {
+    delete window[cbName]; script.remove();
+    const content = document.getElementById('shift-content');
+    if (content) content.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text2)">読み込み失敗</div>';
+  };
+  document.body.appendChild(script);
+}
+
+// ============================================================
+// トップページ（カレンダー＋シフト）
+// ============================================================
+function renderTopPage() {
+  const calContainer = document.getElementById('top-calendar');
+  if (!calContainer) return;
+
+  const now = new Date();
+  const base = new Date(now.getFullYear(), now.getMonth() + calOffset, 1);
+  const year = base.getFullYear();
+  const month = base.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+
+  const dateMap = {};
+  const addToMap = (dateStr, label, isRet) => {
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d)) return;
+      const key = d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
+      if (!dateMap[key]) dateMap[key] = [];
+      const entry = isRet ? '返却: ' + label : label;
+      if (!dateMap[key].includes(entry)) dateMap[key].push(entry);
+    } catch(e) {}
+  };
+  history.forEach(h => { if (h.project) addToMap(h.date, h.project, false); });
+  outItems.forEach(o => {
+    if (o.date || o.dateOut) {
+      try {
+        const d = new Date(o.date || o.dateOut);
+        if (!isNaN(d)) {
+          const key = d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
+          if (!dateMap[key]) dateMap[key] = [];
+          const proj = o.project || '（案件名未入力）';
+          if (!dateMap[key].includes(proj)) dateMap[key].push(proj);
+        }
+      } catch(e) {}
+    }
+    if (o.returnDate) {
+      try {
+        const rd = new Date(o.returnDate);
+        if (!isNaN(rd)) {
+          const rkey = rd.getFullYear() + '-' + (rd.getMonth()+1) + '-' + rd.getDate();
+          if (!dateMap[rkey]) dateMap[rkey] = [];
+          const retLabel = '返却: ' + (o.project || '未入力');
+          if (!dateMap[rkey].includes(retLabel)) dateMap[rkey].push(retLabel);
+        }
+      } catch(e) {}
+    }
+  });
+
+  const monthNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+  const dayNames = ['日','月','火','水','木','金','土'];
+  let calCells = '';
+  dayNames.forEach(d => { calCells += `<div class="cal-head">${d}</div>`; });
+  for (let i = 0; i < (firstDay === 0 ? 6 : firstDay-1); i++) calCells += `<div class="cal-cell empty"></div>`;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const key = year + '-' + (month+1) + '-' + d;
+    const events = dateMap[key] || [];
+    const isToday = d === now.getDate() && month === now.getMonth() && year === now.getFullYear();
+    const eventDots = events.slice(0,5).map(function(e) {
+      const isRet = e.startsWith('返却');
+      const proj = isRet ? e.replace('返却: ','') : e;
+      const label = e.length > 8 ? e.slice(0,8)+'…' : e;
+      return '<div class="cal-event' + (isRet?' ret':'') + '" data-project="' + proj.replace(/"/g,'&quot;') + '" onclick="showProjectDetail(this.dataset.project,event)" style="cursor:pointer">' + label + '</div>';
+    }).join('');
+    calCells += `<div class="cal-cell${isToday?' today':''}${events.length?' has-event':''}"><span class="cal-day">${d}</span>${eventDots}</div>`;
+  }
+
+  calContainer.innerHTML = `
+    <div class="dash-card">
+      <div class="dash-card-head" style="justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:8px">
+          <i class="ti ti-calendar"></i>
+          <span>${year}年${monthNames[month]}</span>
+        </div>
+        <div style="display:flex;gap:4px">
+          <button class="btn" style="padding:4px 8px" onclick="changeCalMonth(-1)"><i class="ti ti-chevron-left"></i></button>
+          ${calOffset !== 0 ? `<button class="btn" style="padding:4px 8px;font-size:11px" onclick="calOffset=0;renderTopPage()">今月</button>` : ''}
+          <button class="btn" style="padding:4px 8px" onclick="changeCalMonth(1)"><i class="ti ti-chevron-right"></i></button>
+        </div>
+      </div>
+      <div class="cal-grid">${calCells}</div>
+      <div class="cal-legend">
+        <span class="cal-event">持ち出し</span>
+        <span class="cal-event ret">返却予定</span>
+      </div>
+    </div>
+  `;
+}
 
 function fetchShortageLog() {
   if (!GAS_API_URL || GAS_API_URL === 'ここにGASのURLを貼り付け') return;
