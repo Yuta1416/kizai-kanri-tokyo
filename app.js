@@ -1363,12 +1363,13 @@ function renderTopPage() {
       upcomingEl.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text2);font-size:13px">今後1週間の予約はありません</div>';
     } else {
       upcomingEl.innerHTML = rows.map(r => `
-        <div style="padding:10px 12px;border-bottom:0.5px solid var(--border);display:flex;gap:10px;align-items:flex-start">
+        <div style="padding:10px 12px;border-bottom:0.5px solid var(--border);display:flex;gap:10px;align-items:flex-start;cursor:pointer" onclick="showProjectDetail(${JSON.stringify(r.project)})">
           <div style="background:${r.type==='reserve'?'var(--info-bg)':'var(--warn-bg)'};color:${r.type==='reserve'?'var(--info-text)':'var(--warn-text)'};border-radius:6px;padding:4px 8px;font-size:10px;font-weight:700;white-space:nowrap;flex-shrink:0">${dateLabel(r.date)}</div>
           <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:600;color:var(--text)">${escHtml(r.project)}</div>
+            <div style="font-size:13px;font-weight:600;color:var(--text);text-decoration:underline;text-underline-offset:2px">${escHtml(r.project)}</div>
             ${r.staff ? `<div style="font-size:11px;color:var(--text2);margin-top:2px">${escHtml(r.staff)}</div>` : ''}
           </div>
+          <div style="color:var(--text2);font-size:16px;align-self:center"><i class="ti ti-chevron-right"></i></div>
         </div>
       `).join('');
     }
