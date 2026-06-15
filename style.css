@@ -162,13 +162,18 @@ tr:hover td { background: var(--bg3); }
   .legend { margin-bottom: 8px; }
 
   /* 在庫カード */
-  .inv-layout { grid-template-columns: 1fr; }
-  .cat-sidebar { display: flex; flex-wrap: wrap; gap: 4px; position: static; padding: 6px; }
-  .cat-sidebar-item { padding: 5px 8px; font-size: 11px; }
+  .inv-layout { grid-template-columns: 1fr; gap: 8px; }
+  .cat-sidebar { display: flex; flex-wrap: wrap; gap: 4px; position: static; padding: 6px; max-height: none; overflow: visible; }
+  .cat-sidebar-item { padding: 5px 10px; font-size: 12px; border: 0.5px solid var(--border2); border-radius: 20px; }
+  .cat-sidebar-item.on { background: var(--text); color: var(--bg); border-color: transparent; }
   .card-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
-  .item-card { padding: 10px 10px; gap: 8px; }
-  .item-card-count { font-size: 18px; }
+  .item-card { padding: 10px; gap: 8px; border-radius: var(--radius); }
+  .item-card-icon { width: 28px; height: 28px; border-radius: 7px; }
+  .item-card-icon i { font-size: 14px; }
+  .item-card-count { font-size: 20px; }
   .item-card-name { font-size: 12px; }
+  .item-card-maker { font-size: 10px; }
+  .item-card-total { font-size: 10px; }
 
   /* モーダル */
   .modal { padding: 1.2rem; }
