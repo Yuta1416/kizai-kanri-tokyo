@@ -1119,33 +1119,12 @@ function renderDashboard() {
   }).join('') : `<div style="text-align:center;padding:2rem;color:var(--text2);font-size:13px">在庫不足の記録がありません</div>`;
 
   container.innerHTML = `
-    <div class="dash-grid">
-      <div class="dash-card">
-        <div class="dash-card-head" style="justify-content:space-between">
-          <div style="display:flex;align-items:center;gap:8px">
-            <i class="ti ti-calendar" aria-hidden="true"></i>
-            <span>${year}年${monthNames[month]}</span>
-            ${calOffset !== 0 ? `<span style="font-size:11px;color:var(--text3)">(今月から${calOffset > 0 ? '+' : ''}${calOffset}ヶ月)</span>` : ''}
-          </div>
-          <div style="display:flex;gap:4px">
-            <button class="btn" style="padding:4px 8px" onclick="changeCalMonth(-1)" ${calOffset <= -6 ? 'disabled' : ''}><i class="ti ti-chevron-left"></i></button>
-            ${calOffset !== 0 ? `<button class="btn" style="padding:4px 8px;font-size:11px" onclick="calOffset=0;renderDashboard()">今月</button>` : ''}
-            <button class="btn" style="padding:4px 8px" onclick="changeCalMonth(1)" ${calOffset >= 6 ? 'disabled' : ''}><i class="ti ti-chevron-right"></i></button>
-          </div>
-        </div>
-        <div class="cal-grid">${calCells}</div>
-        <div class="cal-legend">
-          <span class="cal-event">持ち出し</span>
-          <span class="cal-event ret">返却予定</span>
-        </div>
+    <div class="dash-card">
+      <div class="dash-card-head">
+        <i class="ti ti-chart-bar" aria-hidden="true"></i>
+        <span>在庫不足 TOP${top10.length}</span>
       </div>
-      <div class="dash-card">
-        <div class="dash-card-head">
-          <i class="ti ti-chart-bar" aria-hidden="true"></i>
-          <span>在庫不足 TOP${top10.length}</span>
-        </div>
-        <div class="rep-list">${reportRows}</div>
-      </div>
+      <div class="rep-list">${reportRows}</div>
     </div>
   `;
 }
