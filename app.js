@@ -936,6 +936,11 @@ function applyData(json) {
     });
   }
 
+  if (json.reservations) {
+    reservations = json.reservations;
+    if (currentTab === 'reserve') renderReservations();
+  }
+
   if (json.history && json.history.length > 0) {
     const gasHistory = json.history.map(function(h) {
       return {
@@ -1408,7 +1413,7 @@ function renderReservations() {
   container.innerHTML = Object.entries(groups).map(([project, g]) => {
     const rows = g.items.map(r => `
       <div class="proj-item-row">
-        <span class="proj-item-name">${escHtml(r.model)}</span>
+        <span class="proj-item-name">${escHtml(r.itemName || r.model || '')}</span>
         <span class="proj-item-qty">×${r.qty}</span>
       </div>`).join('');
     return `
