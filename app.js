@@ -291,14 +291,18 @@ function renderOut() {
     const autoLabel = g.returnDate
       ? `<span class="badge s-info" style="font-size:10px"><i class="ti ti-clock"></i> 自動 ${g.returnDate}</span>`
       : `<span class="badge s-absent" style="font-size:10px">手動返却</span>`;
-    const itemRows = g.items.map(o => `
+    const ownItems    = g.items.filter(o => o.note !== '[レンタル]');
+    const rentalItems = g.items.filter(o => o.note === '[レンタル]');
+    const makeRow = o => `
       <div class="proj-item-row">
         <span class="proj-item-name">${o.model}</span>
         <span class="proj-item-qty">×${o.qty}</span>
         <button class="act" style="padding:3px 8px;font-size:11px" onclick="openReturnFromOut(${o.outIdx})">
           <i class="ti ti-arrow-down-left"></i> 返却
         </button>
-      </div>`).join('');
+      </div>`;
+    const itemRows = ownItems.map(makeRow).join('') +
+      (rentalItems.length ? `<div style="border-top:1px dashed var(--border2);margin:6px 0;font-size:10px;color:var(--text2);padding-top:4px">レンタル品</div>` + rentalItems.map(makeRow).join('') : '');
     return `
       <div class="proj-group">
         <div class="proj-group-head" onclick="toggleGroup(this)">
@@ -350,9 +354,14 @@ function renderHistory() {
 
   const q = (document.getElementById('hist-srch')?.value || '').toLowerCase();
 
+  // 修理・レンタル・復帰は非表示
+  const SPECIAL_ACTIONS = new Set(['修理中','レンタル中','長期不在','復帰']);
+
   // 年月でグループ化
   const monthGroups = {};
   [...history].reverse().forEach(h => {
+    if (SPECIAL_ACTIONS.has(h.action)) return;
+    if (!h.project) return;
     if (q) {
       const hit = [h.project, h.staff, h.model, h.note].some(v => String(v||'').toLowerCase().includes(q));
       if (!hit) return;
@@ -400,7 +409,8 @@ function renderHistory() {
               <span class="proj-group-name" style="font-size:13px">${project}</span>
               <span class="proj-group-meta">${g.staff||''}</span>
             </div>
-            <div class="proj-group-right">
+            <div class="proj-group-right" style="display:flex;align-items:center;gap:8px">
+              <button class="btn" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();downloadHistoryPickupList(${JSON.stringify(project)})"><i class="ti ti-file-download"></i> リストDL</button>
               <span class="proj-count">${g.items.length}件</span>
             </div>
           </div>
@@ -425,6 +435,35 @@ function renderHistory() {
   }).join('');
 }
 
+function downloadHistoryPickupList(project) {
+  const items = history.filter(h => h.project === project && h.action === 'OUT');
+  if (!items.length) { alert('持ち出し記録がありません'); return; }
+
+  // 機材ごとに集計（同じmodelは合算）
+  const map = {};
+  items.forEach(h => {
+    const key = h.model;
+    if (!map[key]) map[key] = { model: h.model, qty: 0, staff: h.staff || '', date: h.date || '', note: h.note || '' };
+    map[key].qty += Number(h.qty) || 0;
+  });
+  const rows = Object.values(map);
+
+  const wb = XLSX.utils.book_new();
+  const sheetData = [
+    ['持ち出しリスト'],
+    ['案件名', project],
+    ['担当者', rows[0]?.staff || ''],
+    ['日付', rows[0]?.date || ''],
+    [],
+    ['機材名', '数量', '備考'],
+    ...rows.map(r => [r.model, r.qty, r.note]),
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(sheetData);
+  ws['!cols'] = [{wch:30},{wch:8},{wch:20}];
+  XLSX.utils.book_append_sheet(wb, ws, '持ち出しリスト');
+  XLSX.writeFile(wb, `持ち出しリスト_${project}.xlsx`);
+}
+
 function switchTab(tab, el) {
   currentTab = tab;
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
@@ -435,7 +474,7 @@ function switchTab(tab, el) {
   });
   render();
   if (tab === 'dashboard') { renderDashboard(); fetchShiftFile(); }
-  if (tab === 'all') renderTopPage();
+  if (tab === 'all') { renderTopPage(); fetchStaffShiftFile(); }
 }
 
 function toggleGroup(head) {
@@ -703,41 +742,6 @@ function deleteItem(idx) {
 }
 
 
-function showProjectDetail(project, e) {
-  e.stopPropagation();
-
-  // 該当案件の機材を取得
-  const projectItems = outItems.filter(o =>
-    (o.project || '（案件名未入力）') === project
-  );
-
-  // 履歴からも取得（返却済み含む）
-  const histItems = history.filter(h =>
-    (h.project || '（案件名未入力）') === project
-  );
-
-  const items = projectItems.length > 0 ? projectItems : histItems;
-  if (!items.length) return;
-
-  const dateOut   = items[0].dateOut || items[0].date || '—';
-  const dateRet   = items[0].returnDate || items[0].dateReturn || '—';
-  const staff     = items[0].staff || '—';
-
-  const itemRows = items.map(o =>
-    `<div class="proj-item-row">
-      <span class="proj-item-name">${o.model}</span>
-      <span class="proj-item-qty">×${o.qty}</span>
-    </div>`
-  ).join('');
-
-  const modal = document.getElementById('modal-project-detail');
-  document.getElementById('pd-project').textContent = project;
-  document.getElementById('pd-staff').textContent   = staff;
-  document.getElementById('pd-dateout').textContent = dateOut;
-  document.getElementById('pd-dateret').textContent = dateRet;
-  document.getElementById('pd-items').innerHTML     = itemRows;
-  modal.classList.add('open');
-}
 
 function showProjectDetail(project, ev) {
   if (ev) ev.stopPropagation();
@@ -753,16 +757,26 @@ function showProjectDetail(project, ev) {
   const dateOut = items[0].dateOut || items[0].date || '—';
   const dateRet = items[0].returnDate || items[0].dateReturn || '—';
   const staff   = items[0].staff || '—';
+  const vehicle = items[0].vehicle || '';
 
-  const itemRows = items.map(function(o) {
-    return '<div class="proj-item-row"><span class="proj-item-name">' + o.model + '</span><span class="proj-item-qty">×' + o.qty + '</span></div>';
-  }).join('');
+  const ownItems    = items.filter(function(o) { return o.note !== '[レンタル]'; });
+  const rentalItems = items.filter(function(o) { return o.note === '[レンタル]'; });
+  const makeItemRow = function(o) {
+    return '<div class="proj-item-row"><span class="proj-item-name">' + escHtml(o.model||'') + '</span><span class="proj-item-qty">×' + o.qty + '</span></div>';
+  };
+  const itemRows = ownItems.map(makeItemRow).join('') +
+    (rentalItems.length ? '<div style="border-top:1px dashed var(--border2);margin:6px 0;font-size:10px;color:var(--text2);padding-top:4px">レンタル品</div>' + rentalItems.map(makeItemRow).join('') : '');
 
   document.getElementById('pd-project').textContent = project;
   document.getElementById('pd-staff').textContent   = staff;
   document.getElementById('pd-dateout').textContent = dateOut;
   document.getElementById('pd-dateret').textContent = dateRet;
   document.getElementById('pd-items').innerHTML     = itemRows;
+  const pdVehicle = document.getElementById('pd-vehicle');
+  if (pdVehicle) {
+    pdVehicle.textContent = vehicle || '—';
+    pdVehicle.closest('.pd-vehicle-row').style.display = vehicle ? '' : 'none';
+  }
   document.getElementById('modal-project-detail').classList.add('open');
 }
 
@@ -918,8 +932,11 @@ function applyData(json) {
           qty:        parseInt(r.qty) || 0,
           project:    String(r.project    || ''),
           staff:      String(r.staff      || ''),
+          dateOut:    String(r.dateOut    || ''),
           returnDate: String(r.dateReturn || ''),
           date:       String(r.date       || ''),
+          vehicle:    String(r.vehicle    || ''),
+          note:       String(r.note       || ''),
         };
       });
 
@@ -978,6 +995,7 @@ function fetchFromSpreadsheet() {
     document.getElementById('cache-banner').classList.add('show');
   }
   fetchShiftFile();
+  fetchStaffShiftFile();
 
   const cbName = 'gasCallback_' + Date.now();
   window[cbName] = function(json) {
@@ -1162,8 +1180,20 @@ function downloadPickupList(project, event) {
     const el = document.getElementById('jsonp_' + cbName);
     if (el) el.remove();
     if (json.status !== 'ok') { alert('取得失敗: ' + (json.message || 'エラー')); return; }
-    const bytes = Uint8Array.from(atob(json.data), c => c.charCodeAt(0));
-    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const items = json.items || [];
+    if (!items.length) { alert('持ち出し中の機材がありません'); return; }
+    const meta = items[0];
+    const wb = XLSX.utils.book_new();
+    const header = [['案件名', meta.project || ''], ['担当者', meta.staff || ''],
+      ['搬入予定', meta.dateOut || ''], ['返却予定', meta.dateReturn || ''],
+      ['車両', meta.vehicle || ''], [],
+      ['カテゴリ', '機材名', '数量', '備考']];
+    const rows = items.map(it => [it.category || '', it.itemName || '', it.qty || 0, it.note || '']);
+    const ws = XLSX.utils.aoa_to_sheet([...header, ...rows]);
+    ws['!cols'] = [{wch:14},{wch:28},{wch:8},{wch:20}];
+    XLSX.utils.book_append_sheet(wb, ws, '持ち出しリスト');
+    const wbout = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+    const blob = new Blob([wbout], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = json.filename || '持ち出しリスト.xlsx';
@@ -1222,18 +1252,103 @@ function renderShiftSheet(idx) {
   if (!wb) return;
   const content = document.getElementById('shift-content');
   if (!content) return;
-  const tabs = wb.SheetNames.map((name, i) =>
+  const sheetNames = wb.SheetNames.slice(0, 6);
+  const tabs = sheetNames.map((name, i) =>
     `<button onclick="renderShiftSheet(${i})" style="padding:4px 10px;font-size:11px;border:1px solid var(--border2);border-radius:4px;cursor:pointer;background:${i===idx?'var(--accent)':'var(--bg2)'};color:${i===idx?'#fff':'var(--text1)'}">${escHtml(name)}</button>`
   ).join('');
-  const ws = wb.Sheets[wb.SheetNames[idx]];
+  const ws = wb.Sheets[sheetNames[idx] || wb.SheetNames[0]];
   if (ws['!ref']) {
     const range = XLSX.utils.decode_range(ws['!ref']);
     range.e.c = Math.min(range.e.c, 9);  // J列(index 9)まで
-    range.e.r = Math.min(range.e.r, 31); // 32行まで
+    range.e.r = Math.min(range.e.r, 199); // 200行まで
     ws['!ref'] = XLSX.utils.encode_range(range);
   }
   const html = XLSX.utils.sheet_to_html(ws, {editable: false});
   content.innerHTML = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">${tabs}</div><div class="shift-table-wrap">${html}</div>`;
+}
+
+function fetchStaffShiftFile() {
+  if (!GAS_API_URL || GAS_API_URL === 'ここにGASのURLを貼り付け') return;
+  const cbName = 'staffShiftCb_' + Date.now();
+  window[cbName] = function(json) {
+    delete window[cbName];
+    document.getElementById('jsonp_'+cbName)?.remove();
+    const content = document.getElementById('staff-shift-content');
+    if (!content) return;
+    if (json.status !== 'ok') {
+      content.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text2);font-size:13px">ファイルが見つかりません: ' + escHtml(json.message||'エラー') + '</div>';
+      return;
+    }
+    const fname = document.getElementById('staff-shift-filename');
+    if (fname) fname.textContent = json.filename || 'スタッフシフト';
+    const bytes = Uint8Array.from(atob(json.data), c => c.charCodeAt(0));
+    const wb = XLSX.read(bytes, {type:'array'});
+    window._staffShiftWb = wb;
+    renderStaffShiftSheet(0);
+  };
+  const script = document.createElement('script');
+  script.id = 'jsonp_' + cbName;
+  script.src = GAS_API_URL + '?action=staff_shift_file&callback=' + cbName;
+  script.onerror = function() {
+    delete window[cbName]; script.remove();
+    const content = document.getElementById('staff-shift-content');
+    if (content) content.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text2)">読み込み失敗</div>';
+  };
+  document.body.appendChild(script);
+}
+
+function renderStaffShiftSheet(idx) {
+  const wb = window._staffShiftWb;
+  if (!wb) return;
+  const content = document.getElementById('staff-shift-content');
+  if (!content) return;
+  const sheetNames = wb.SheetNames.slice(0, 6);
+  const tabs = sheetNames.map((name, i) =>
+    `<button onclick="renderStaffShiftSheet(${i})" style="padding:4px 10px;font-size:11px;border:1px solid var(--border2);border-radius:4px;cursor:pointer;background:${i===idx?'var(--accent)':'var(--bg2)'};color:${i===idx?'#fff':'var(--text1)'}">${escHtml(name)}</button>`
+  ).join('');
+  const ws = wb.Sheets[sheetNames[idx] || wb.SheetNames[0]];
+  const data = XLSX.utils.sheet_to_json(ws, {header:1, defval:'', range:0});
+
+  const blueCols = new Set([3,5,7,9]);
+
+  let html = '<table style="border-collapse:collapse;table-layout:fixed;width:100%">';
+  html += '<colgroup><col style="width:26px"><col style="width:24px">';
+  for (let c = 2; c < 10; c++) html += '<col>';
+  html += '</colgroup>';
+
+  data.slice(0, 35).forEach((row, r) => {
+    const youbi = String(row[1] || '');
+    const isSat = youbi === '土';
+    const isSun = youbi === '日';
+    const rowCls = isSat ? 'sft-sat' : isSun ? 'sft-sun' : '';
+
+    if (r === 0) {
+      html += '<tr>';
+      html += `<td colspan="2" class="sft-cell sft-hd" style="font-size:11px">${escHtml(String(row[0]||''))}</td>`;
+      for (let c = 2; c < 10; c++) {
+        const cls = blueCols.has(c) ? 'sft-cell sft-hd sft-hd-blue' : 'sft-cell sft-hd';
+        html += `<td class="${cls}">${escHtml(String(row[c]||''))}</td>`;
+      }
+      html += '</tr>';
+    } else {
+      html += '<tr>';
+      const txtCls = isSat ? ' sft-sat-txt' : isSun ? ' sft-sun-txt' : '';
+      // 日付
+      html += `<td class="sft-cell sft-dt ${rowCls}${txtCls}" style="font-size:14px">${escHtml(String(row[0]||''))}</td>`;
+      // 曜日
+      html += `<td class="sft-cell sft-dt ${rowCls}${txtCls}" style="font-size:13px">${escHtml(youbi)}</td>`;
+      // スタッフ列
+      for (let c = 2; c < 10; c++) {
+        const val = String(row[c] !== undefined ? row[c] : '');
+        const cls = rowCls ? `sft-cell ${rowCls}` : blueCols.has(c) ? 'sft-cell sft-blue' : 'sft-cell';
+        html += `<td class="${cls}">${escHtml(val)}</td>`;
+      }
+      html += '</tr>';
+    }
+  });
+
+  html += '</table>';
+  content.innerHTML = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">${tabs}</div><div style="overflow-x:auto">${html}</div>`;
 }
 
 // ============================================================
@@ -1407,7 +1522,7 @@ function renderReservations() {
   const groups = {};
   reservations.forEach(r => {
     const key = r.project || '（案件名未入力）';
-    if (!groups[key]) groups[key] = { items: [], staff: r.staff, dateOut: r.dateOut, dateReturn: r.dateReturn };
+    if (!groups[key]) groups[key] = { items: [], staff: r.staff, dateOut: r.dateOut, dateReturn: r.dateReturn, vehicle: r.vehicle || '' };
     groups[key].items.push(r);
   });
   container.innerHTML = Object.entries(groups).map(([project, g]) => {
@@ -1424,6 +1539,7 @@ function renderReservations() {
             <span class="proj-group-name">${escHtml(project)}</span>
             <span class="proj-group-meta">${escHtml(g.staff||'担当未入力')}</span>
             <span class="badge s-info" style="font-size:10px"><i class="ti ti-calendar"></i> 搬入 ${escHtml(g.dateOut)}</span>
+            ${g.vehicle ? `<span class="badge" style="font-size:10px;background:var(--border);color:var(--text2)"><i class="ti ti-car"></i> ${escHtml(g.vehicle)}</span>` : ''}
           </div>
           <div class="proj-group-right">
             <span class="proj-count">${g.items.length}品目</span>

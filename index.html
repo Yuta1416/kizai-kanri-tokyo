@@ -76,6 +76,18 @@
         </div>
       </div>
     </div>
+    <div class="dash-card" style="margin-top:14px">
+      <div class="dash-card-head" style="justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:8px">
+          <i class="ti ti-calendar-event" aria-hidden="true"></i>
+          <span id="staff-shift-filename">スタッフシフト</span>
+        </div>
+        <button class="btn" style="padding:4px 8px;font-size:11px" onclick="fetchStaffShiftFile()"><i class="ti ti-refresh"></i> 更新</button>
+      </div>
+      <div id="staff-shift-content" style="overflow-x:auto;padding:8px">
+        <div style="text-align:center;padding:2rem;color:var(--text2);font-size:13px">読み込み中...</div>
+      </div>
+    </div>
   </div>
 
   <div id="view-inventory" style="display:none">
@@ -125,25 +137,7 @@
   </div>
 
   <div id="view-dashboard" style="display:none">
-    <div class="top-layout" style="margin-bottom:14px">
-      <div>
-        <div id="dashboard-container"></div>
-      </div>
-      <div>
-        <div class="dash-card">
-          <div class="dash-card-head" style="justify-content:space-between">
-            <div style="display:flex;align-items:center;gap:8px">
-              <i class="ti ti-calendar-event" aria-hidden="true"></i>
-              <span id="shift-filename">シフト</span>
-            </div>
-            <button class="btn" style="padding:4px 8px;font-size:11px" onclick="fetchShiftFile()"><i class="ti ti-refresh"></i> 更新</button>
-          </div>
-          <div id="shift-content" style="overflow:auto;max-height:calc(100vh - 160px);padding:8px">
-            <div style="text-align:center;padding:2rem;color:var(--text2);font-size:13px">読み込み中...</div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <div id="dashboard-container"></div>
   </div>
 </div>
 
@@ -264,6 +258,9 @@
         <span><i class="ti ti-user" aria-hidden="true"></i> <span id="pd-staff"></span></span>
         <span><i class="ti ti-arrow-up-right" aria-hidden="true"></i> <span id="pd-dateout"></span></span>
         <span><i class="ti ti-arrow-down-left" aria-hidden="true"></i> <span id="pd-dateret"></span></span>
+      </div>
+      <div class="pd-vehicle-row" style="font-size:12px;color:var(--text2);margin-bottom:8px">
+        <i class="ti ti-car" aria-hidden="true"></i> <span id="pd-vehicle"></span>
       </div>
       <div id="pd-items"></div>
     </div>
