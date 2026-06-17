@@ -958,6 +958,9 @@ function applyData(json) {
     if (currentTab === 'reserve') renderReservations();
   }
 
+  borrowed = json.borrowed || [];
+  renderBorrowed();
+
   if (json.history && json.history.length > 0) {
     const gasHistory = json.history.map(function(h) {
       return {
@@ -1212,6 +1215,23 @@ function downloadPickupList(project, event) {
 }
 
 let reservations = [];
+let borrowed = [];
+
+function renderBorrowed() {
+  const el = document.getElementById('borrowed-banner');
+  if (!el) return;
+  if (!borrowed || !borrowed.length) { el.innerHTML = ''; return; }
+  const rows = borrowed.map(b => `
+    <div class="proj-item-row">
+      <span class="proj-item-name">${escHtml(b.model)} <span style="color:var(--text2);font-size:11px">（${escHtml(b.from||'大阪')}より${b.dateReturn?' / 返却 '+escHtml(b.dateReturn):''}）</span></span>
+      <span class="proj-item-qty">×${b.qty}</span>
+    </div>`).join('');
+  el.innerHTML = `
+    <div class="dash-card" style="margin-bottom:12px;border-left:3px solid var(--info-text)">
+      <div class="dash-card-head"><i class="ti ti-truck-loading" style="color:var(--info-text)"></i> <span>他拠点から借用中（${borrowed.length}件）</span></div>
+      <div style="padding:4px 0">${rows}</div>
+    </div>`;
+}
 let shortageData = {};
 
 // ============================================================
