@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 <link rel="stylesheet" href="style.css">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0f172a">
@@ -36,13 +37,9 @@
     </div>
   </header>
 
-  <div id="cache-banner">
-    <span><i class="ti ti-database"></i> キャッシュから表示中 — バックグラウンドで更新しています</span>
-    <button class="btn" style="font-size:11px;padding:2px 8px" onclick="document.getElementById('cache-banner').classList.remove('show')">閉じる</button>
-  </div>
   <div class="stats" id="stats"></div>
 
-  <div id="borrowed-banner"></div>
+  <div id="conflict-banner"></div>
 
   <div class="legend">
     <span class="badge s-in"><i class="ti ti-circle-check"></i> IN</span>
@@ -54,13 +51,13 @@
   </div>
 
   <nav class="tab-bar">
-    <button class="tab on" onclick="switchTab('all',this)">ホーム</button>
-    <button class="tab" onclick="switchTab('inventory',this)">在庫</button>
-    <button class="tab" onclick="switchTab('out',this)">持ち出し中</button>
-    <button class="tab" onclick="switchTab('reserve',this)">持ち出し予約</button>
-    <button class="tab" onclick="switchTab('special',this)">修理・レンタル・不在</button>
-    <button class="tab" onclick="switchTab('history',this)">履歴</button>
-    <button class="tab" onclick="switchTab('dashboard',this)"><i class="ti ti-layout-dashboard" aria-hidden="true"></i> ダッシュボード</button>
+    <button class="tab on" data-tab="all" onclick="switchTab('all',this)"><i class="ti ti-home" aria-hidden="true"></i> ホーム</button>
+    <button class="tab" data-tab="inventory" onclick="switchTab('inventory',this)"><i class="ti ti-box" aria-hidden="true"></i> 在庫</button>
+    <button class="tab" data-tab="out" onclick="switchTab('out',this)"><i class="ti ti-arrow-up-right" aria-hidden="true"></i> 持ち出し中</button>
+    <button class="tab" data-tab="reserve" onclick="switchTab('reserve',this)"><i class="ti ti-calendar-time" aria-hidden="true"></i> 持ち出し予約</button>
+    <button class="tab" data-tab="special" onclick="switchTab('special',this)"><i class="ti ti-tool" aria-hidden="true"></i> 修理・レンタル・不在</button>
+    <button class="tab" data-tab="history" onclick="switchTab('history',this)"><i class="ti ti-history" aria-hidden="true"></i> 履歴</button>
+    <button class="tab" data-tab="dashboard" onclick="switchTab('dashboard',this)"><i class="ti ti-layout-dashboard" aria-hidden="true"></i> ダッシュボード</button>
   </nav>
 
   <div id="view-all">
@@ -238,6 +235,20 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="modal-loan">
+  <div class="modal">
+    <h3><i class="ti ti-truck-delivery"></i> 大阪へ貸出</h3>
+    <div class="fr"><label>機材</label><input id="loan-item" readonly></div>
+    <div class="fr"><label>貸出数（残数: <span id="loan-avail"></span>）</label><input type="number" id="loan-qty" min="1" value="1"></div>
+    <div class="fr"><label>担当者</label><input id="loan-staff" placeholder="担当者名"></div>
+    <div class="fr"><label>返却予定日（任意・例: 2026/7/1）</label><input id="loan-ret" placeholder="未定でも可"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modal-loan')">キャンセル</button>
+      <button class="btn btn-primary" onclick="doLoan()">貸出確定</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="modal-note">
   <div class="modal">
     <h3><i class="ti ti-notes"></i> 備考編集</h3>
@@ -267,11 +278,21 @@
       <div id="pd-items"></div>
     </div>
     <div class="modal-actions">
-      <button class="btn" onclick="downloadPickupList(document.getElementById('pd-project').textContent)"><i class="ti ti-file-download"></i> 持ち出しリストDL</button>
+      <button class="btn" onclick="downloadPickupList(pdProject, pdDateKey)"><i class="ti ti-file-download"></i> 持ち出しリストDL</button>
       <button class="btn btn-primary" onclick="closeModal('modal-project-detail')">閉じる</button>
     </div>
   </div>
 </div>
+
+<!-- スマホ用ボトムナビ -->
+<nav class="bottom-nav">
+  <button class="bnav-item on" data-tab="all" onclick="switchTab('all',this)"><i class="ti ti-home" aria-hidden="true"></i><span>ホーム</span></button>
+  <button class="bnav-item" data-tab="inventory" onclick="switchTab('inventory',this)"><i class="ti ti-box" aria-hidden="true"></i><span>在庫</span></button>
+  <button class="bnav-item" data-tab="out" onclick="switchTab('out',this)"><i class="ti ti-arrow-up-right" aria-hidden="true"></i><span>持出中</span></button>
+  <button class="bnav-item" data-tab="reserve" onclick="switchTab('reserve',this)"><i class="ti ti-calendar-time" aria-hidden="true"></i><span>予約</span></button>
+  <button class="bnav-item" data-tab="history" onclick="switchTab('history',this)"><i class="ti ti-history" aria-hidden="true"></i><span>履歴</span></button>
+  <button class="bnav-item" data-tab="dashboard" onclick="switchTab('dashboard',this)"><i class="ti ti-layout-dashboard" aria-hidden="true"></i><span>分析</span></button>
+</nav>
 
 </body>
 </html>

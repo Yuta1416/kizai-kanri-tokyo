@@ -131,8 +131,30 @@ const RAW = [
 
 let inv = RAW.map(c => ({cat:c[0],maker:c[1],model:c[2],total:c[3],out:0,special:0,status:'IN',note:c[4]||''}));
 let outItems = [], history = [];
+
+// 日付文字列を堅牢にパース（"2026/9/23 11:00" / "2026年9月23日 11:00" 両対応）
+function parseDate(str) {
+  if (!str) return null;
+  const s = String(str).trim();
+  const m = s.match(/(\d{4})年(\d{1,2})月(\d{1,2})日(?:[\s　]*(\d{1,2}):(\d{2}))?/);
+  if (m) return new Date(+m[1], +m[2]-1, +m[3], m[4]?+m[4]:0, m[5]?+m[5]:0);
+  const d = new Date(s.replace(/　/g, ' '));
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// 搬入日から yyyyMMdd キー（持ち出しリストの現場を区別する用）
+function dateKeyOf(str) {
+  const d = parseDate(str);
+  if (!d) return '';
+  return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+}
 let currentTab = 'all';
-let coIdx=-1, retIdx=-1, retOutIdx=-1, spIdx=-1, noteIdx=-1;
+let coIdx=-1, retIdx=-1, retOutIdx=-1, spIdx=-1, noteIdx=-1, loanIdx=-1;
+let loans = [];
+let rentalRanking = [];
+let conflicts = [];
+let pdDateKey = '';
+let pdProject = '';
 
 function calcSt(item) {
   if (['修理中','レンタル中','長期不在'].includes(item.status) && item.special > 0) return item.status;
@@ -149,6 +171,13 @@ function badge(st) {
 
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// 現場名に [貸出] [東京] が入っていたら貸出バッジを返す
+function loanBadge(projectName) {
+  return /\[(貸出|東京|LOAN|loan)\]/i.test(String(projectName||''))
+    ? '<span style="display:inline-block;background:#9C27B0;color:#fff;font-size:10px;padding:2px 7px;border-radius:8px;margin-left:6px;font-weight:600">🚚 貸出</span>'
+    : '';
 }
 
 function render() {
@@ -185,9 +214,18 @@ function renderCats() {
   const cats = [...new Set(inv.map(i => i.cat))];
   const counts = {};
   cats.forEach(c => counts[c] = inv.filter(i => i.cat === c).length);
-  sidebar.innerHTML =
+  // モバイル用ドロップダウン + デスクトップ用サイドバー（CSSで切替）
+  const selectHTML =
+    `<select class="cat-select" onchange="selectCat(this.value)">` +
+    `<option value=""${currentCat===''?' selected':''}>すべてのカテゴリ (${inv.length})</option>` +
+    cats.map(c => `<option value="${escHtml(c)}"${currentCat===c?' selected':''}>${escHtml(c)} (${counts[c]})</option>`).join('') +
+    `</select>`;
+  const listHTML =
+    `<div class="cat-sidebar-list">` +
     `<div class="cat-sidebar-item${currentCat===''?' on':''}" onclick="selectCat('')">すべて <span class="cat-sidebar-count">${inv.length}</span></div>` +
-    cats.map(c => `<div class="cat-sidebar-item${currentCat===c?' on':''}" onclick="selectCat('${c}')">${c} <span class="cat-sidebar-count">${counts[c]}</span></div>`).join('');
+    cats.map(c => `<div class="cat-sidebar-item${currentCat===c?' on':''}" onclick="selectCat('${escHtml(c)}')">${escHtml(c)} <span class="cat-sidebar-count">${counts[c]}</span></div>`).join('') +
+    `</div>`;
+  sidebar.innerHTML = selectHTML + listHTML;
 }
 
 function selectCat(cat) {
@@ -270,54 +308,94 @@ function openItemDetail(idx) {
     (canOut?`<button class="btn btn-primary" onclick="closeModal('modal-detail');openCheckout(${idx})"><i class="ti ti-arrow-up-right"></i> 持ち出し</button>`:'') +
     (item.out>0?`<button class="btn" onclick="closeModal('modal-detail');openReturn(${idx})"><i class="ti ti-arrow-down-left"></i> 返却</button>`:'') +
     (av>0?`<button class="btn" onclick="closeModal('modal-detail');openSpecial(${idx})"><i class="ti ti-tool"></i> 特殊</button>`:'') +
+    (canOut?`<button class="btn" onclick="closeModal('modal-detail');openLoan(${idx})"><i class="ti ti-truck-delivery"></i> 大阪へ貸出</button>`:'') +
     `<button class="btn" onclick="closeModal('modal-detail');openNoteModal(${idx})"><i class="ti ti-pencil"></i> 備考</button>` +
     `<button class="btn act d" onclick="closeModal('modal-detail');deleteItem(${idx})"><i class="ti ti-trash"></i></button>`;
   openModal('modal-detail');
 }
 
+function renderLoansSection() {
+  if (!loans || !loans.length) return '';
+  const rows = loans.map(l => `
+    <div class="proj-item-row">
+      <span class="proj-item-name">${escHtml(l.model)} <span style="color:var(--text2);font-size:11px">→ ${escHtml(l.dest||'東京')}${l.dateReturn?' / 返却 '+escHtml(l.dateReturn):''}</span></span>
+      <span class="proj-item-qty">×${l.qty}</span>
+      <button class="act" style="padding:3px 8px;font-size:11px" onclick="loanReturn('${l.loanId}')"><i class="ti ti-arrow-down-left"></i> 返却</button>
+    </div>`).join('');
+  return `
+    <div class="proj-group">
+      <div class="proj-group-head" onclick="toggleGroup(this)">
+        <div class="proj-group-left">
+          <i class="ti ti-chevron-down proj-chevron"></i>
+          <i class="ti ti-truck-delivery" style="color:var(--info-text)"></i>
+          <span class="proj-group-name">拠点間貸出中</span>
+        </div>
+        <div class="proj-group-right"><span class="proj-count">${loans.length}件</span></div>
+      </div>
+      <div class="proj-group-body">${rows}</div>
+    </div>`;
+}
+
 function renderOut() {
   const container = document.getElementById('out-container');
+  const loanHtml = renderLoansSection();
   if (!outItems.length) {
-    container.innerHTML = `<div class="empty">持ち出し中の機材はありません</div>`;
+    container.innerHTML = loanHtml || `<div class="empty">持ち出し中の機材はありません</div>`;
     return;
   }
   const groups = {};
   outItems.forEach((o,i) => {
-    const key = o.project || '（案件名未入力）';
-    if (!groups[key]) groups[key] = {items:[], staff:o.staff, returnDate:o.returnDate};
+    const proj = o.project || '（案件名未入力）';
+    const dk = dateKeyOf(o.dateOut);
+    const key = proj + '｜' + dk;  // 同名現場でも搬入日で分ける
+    if (!groups[key]) groups[key] = {items:[], project:proj, dateKey:dk, staff:o.staff, returnDate:o.returnDate, dateOut:o.dateOut};
     groups[key].items.push({...o, outIdx:i});
   });
-  container.innerHTML = Object.entries(groups).map(([project, g]) => {
+  container.innerHTML = loanHtml + Object.values(groups).map(g => {
+    const project = g.project;
+    const _d = parseDate(g.dateOut);
+    const _md = _d ? `（${_d.getMonth()+1}/${_d.getDate()}）` : '';
     const autoLabel = g.returnDate
       ? `<span class="badge s-info" style="font-size:10px"><i class="ti ti-clock"></i> 自動 ${g.returnDate}</span>`
       : `<span class="badge s-absent" style="font-size:10px">手動返却</span>`;
-    const ownItems    = g.items.filter(o => o.note !== '[レンタル]');
+    const ownItems    = g.items.filter(o => o.note !== '[レンタル]' && o.note !== '(在庫管理外)');
     const rentalItems = g.items.filter(o => o.note === '[レンタル]');
-    const makeRow = o => `
+    const freeItems   = g.items.filter(o => o.note === '(在庫管理外)');
+    const makeRow = o => {
+      const mkLabel = (o.note === '[レンタル]' && o.maker) ? `<span style="font-size:10px;color:var(--info-text);margin-left:6px">（${escHtml(o.maker)}）</span>` : '';
+      return `
       <div class="proj-item-row">
-        <span class="proj-item-name">${o.model}</span>
+        <span class="proj-item-name">${escHtml(String(o.model||''))}${mkLabel}</span>
         <span class="proj-item-qty">×${o.qty}</span>
         <button class="act" style="padding:3px 8px;font-size:11px" onclick="openReturnFromOut(${o.outIdx})">
           <i class="ti ti-arrow-down-left"></i> 返却
         </button>
       </div>`;
-    const itemRows = ownItems.map(makeRow).join('') +
-      (rentalItems.length ? `<div style="border-top:1px dashed var(--border2);margin:6px 0;font-size:10px;color:var(--text2);padding-top:4px">レンタル品</div>` + rentalItems.map(makeRow).join('') : '');
+    };
+    // カテゴリでまとめて縦に表示
+    const groupByCat = list => {
+      let html = '', last = null;
+      list.forEach(o => { const c = o.category || 'その他'; if (c !== last) { html += `<div class="pd-cat-head">${escHtml(c)}</div>`; last = c; } html += makeRow(o); });
+      return html;
+    };
+    const itemRows = groupByCat(ownItems) +
+      (rentalItems.length ? `<div class="pd-cat-head pd-cat-rental">レンタル品</div>` + rentalItems.map(makeRow).join('') : '') +
+      (freeItems.length ? `<div class="pd-cat-head pd-cat-free">備考（フリー機材）</div>` + freeItems.map(makeRow).join('') : '');
     return `
       <div class="proj-group">
         <div class="proj-group-head" onclick="toggleGroup(this)">
           <div class="proj-group-left">
             <i class="ti ti-chevron-down proj-chevron"></i>
-            <span class="proj-group-name">${project}</span>
+            <span class="proj-group-name">${project}${_md}${loanBadge(project)}</span>
             <span class="proj-group-meta">${g.staff||'担当未入力'}</span>
             ${autoLabel}
           </div>
           <div class="proj-group-right">
             <span class="proj-count">${g.items.length}品目</span>
-            <button class="act" onclick="downloadPickupList('${project}',event)" style="font-size:11px">
+            <button class="act" onclick="downloadPickupList('${project}','${g.dateKey}',event)" style="font-size:11px">
               <i class="ti ti-file-download"></i> DL
             </button>
-            <button class="act btn-bulk-return" onclick="bulkReturn('${project}',event)">
+            <button class="act btn-bulk-return" onclick="bulkReturn('${project}','${g.dateKey}',event)">
               <i class="ti ti-rotate"></i> 一括返却
             </button>
           </div>
@@ -347,6 +425,14 @@ function renderSpecial() {
 
 function renderHistory() {
   const container = document.getElementById('hist-container');
+  try {
+    _renderHistoryInner(container);
+  } catch(e) {
+    container.innerHTML = `<div class="empty" style="color:#f99;padding:1rem;text-align:left;white-space:pre-wrap;font-family:monospace;font-size:11px">renderHistoryエラー: ${e.message}\n\nstack:\n${e.stack||''}</div>`;
+  }
+}
+
+function _renderHistoryInner(container) {
   if (!history.length) {
     container.innerHTML = `<div class="empty">履歴がありません</div>`;
     return;
@@ -385,36 +471,105 @@ function renderHistory() {
     monthGroups[ym][project].items.push(h);
   });
 
+  // 機材名→カテゴリの逆引き（在庫マスター inv から）
+  const lookupCategory = (modelName) => {
+    const mn = String(modelName || '');
+    if (!mn) return null;
+    // 完全一致（maker+model または model 単独）
+    for (const it of inv) {
+      const im = String(it.model || '');
+      const imk = String(it.maker || '');
+      if (im === mn) return it.cat;
+      if ((imk + ' ' + im) === mn) return it.cat;
+    }
+    // 最長部分一致
+    let bestCat = null, bestLen = 0;
+    for (const it of inv) {
+      const im = String(it.model || '');
+      if (!im) continue;
+      if (mn.includes(im) && im.length > bestLen) {
+        bestCat = it.cat; bestLen = im.length;
+      }
+    }
+    return bestCat;
+  };
+  // 在庫マスターでのカテゴリ出現順
+  const catOrder = [...new Set(inv.map(i => i.cat))];
+
   container.innerHTML = Object.entries(monthGroups).map(([ym, projects]) => {
     const projectRows = Object.entries(projects).map(([project, g]) => {
-      const itemRows = g.items.map(h => {
+      const makeRow = h => {
         const cls = h.action==='OUT'?'s-out':
           h.action==='自動返却'||h.action==='一括返却'?'s-info':
           h.action==='持ち出し中'?'s-out':'s-in';
         const actionLabel = h.action==='持ち出し中' ? 'OUT' : h.action;
+        const makerLabel = (h.kind === '[レンタル]' && h.maker) ? `<span style="font-size:10px;color:var(--info-text);margin-left:6px">（${escHtml(h.maker)}）</span>` : '';
         return `
           <div class="proj-item-row">
             <span style="font-size:11px;color:var(--text2);min-width:120px">${h.date}</span>
-            <span class="proj-item-name">${h.model}</span>
+            <span class="proj-item-name">${escHtml(String(h.model||''))}${makerLabel}</span>
             <span class="proj-item-qty">×${h.qty}</span>
             <span class="badge ${cls}" style="font-size:10px">${actionLabel}</span>
-            <span style="font-size:11px;color:var(--text2)">${h.note||''}</span>
+            <span style="font-size:11px;color:var(--text2)">${escHtml(h.note||'')}</span>
           </div>`;
-      }).join('');
+      };
+      // 種別で先に振り分け（履歴シートのkind列を優先、無ければ在庫マスター逆引き）
+      const byCat = {};
+      const rentals = [];
+      const frees = [];
+      const others = [];
+      g.items.forEach(h => {
+        if (h.kind === '[レンタル]') { rentals.push(h); return; }
+        if (h.kind === '(在庫管理外)') { frees.push(h); return; }
+        // 履歴シートにカテゴリがあればそれを使う、無ければ逆引き
+        const cat = h.category || lookupCategory(h.model);
+        if (cat) {
+          if (!byCat[cat]) byCat[cat] = [];
+          byCat[cat].push(h);
+        } else {
+          others.push(h);
+        }
+      });
+      let itemRows = '';
+      // 在庫マスター出現順に並べ、その後に履歴のみに存在するカテゴリを追加
+      const seenCats = new Set();
+      catOrder.forEach(cat => {
+        if (!byCat[cat] || !byCat[cat].length) return;
+        itemRows += `<div class="pd-cat-head">${escHtml(cat)}</div>`;
+        byCat[cat].forEach(h => itemRows += makeRow(h));
+        seenCats.add(cat);
+      });
+      Object.keys(byCat).forEach(cat => {
+        if (seenCats.has(cat)) return;
+        itemRows += `<div class="pd-cat-head">${escHtml(cat)}</div>`;
+        byCat[cat].forEach(h => itemRows += makeRow(h));
+      });
+      if (rentals.length) {
+        itemRows += `<div class="pd-cat-head pd-cat-rental">レンタル品</div>`;
+        rentals.forEach(h => itemRows += makeRow(h));
+      }
+      if (frees.length) {
+        itemRows += `<div class="pd-cat-head pd-cat-free">備考（フリー機材）</div>`;
+        frees.forEach(h => itemRows += makeRow(h));
+      }
+      if (others.length) {
+        itemRows += `<div class="pd-cat-head">その他</div>`;
+        others.forEach(h => itemRows += makeRow(h));
+      }
       return `
         <div class="proj-group" style="margin:6px 0 0 0">
           <div class="proj-group-head" onclick="toggleGroup(this)" style="background:var(--bg)">
             <div class="proj-group-left">
-              <i class="ti ti-chevron-down proj-chevron"></i>
-              <span class="proj-group-name" style="font-size:13px">${project}</span>
+              <i class="ti ti-chevron-down proj-chevron" style="transform:rotate(-90deg)"></i>
+              <span class="proj-group-name" style="font-size:13px">${project}${loanBadge(project)}</span>
               <span class="proj-group-meta">${g.staff||''}</span>
             </div>
             <div class="proj-group-right" style="display:flex;align-items:center;gap:8px">
-              <button class="btn" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();downloadHistoryPickupList(${JSON.stringify(project)})"><i class="ti ti-file-download"></i> リストDL</button>
+              <button class="btn" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();downloadHistoryPickupList('${project.replace(/'/g,"\\'")}')"><i class="ti ti-file-download"></i> リストDL</button>
               <span class="proj-count">${g.items.length}件</span>
             </div>
           </div>
-          <div class="proj-group-body">${itemRows}</div>
+          <div class="proj-group-body" style="display:none">${itemRows}</div>
         </div>`;
     }).join('');
 
@@ -435,39 +590,15 @@ function renderHistory() {
   }).join('');
 }
 
-function downloadHistoryPickupList(project) {
-  const items = history.filter(h => h.project === project && h.action === 'OUT');
-  if (!items.length) { alert('持ち出し記録がありません'); return; }
-
-  // 機材ごとに集計（同じmodelは合算）
-  const map = {};
-  items.forEach(h => {
-    const key = h.model;
-    if (!map[key]) map[key] = { model: h.model, qty: 0, staff: h.staff || '', date: h.date || '', note: h.note || '' };
-    map[key].qty += Number(h.qty) || 0;
-  });
-  const rows = Object.values(map);
-
-  const wb = XLSX.utils.book_new();
-  const sheetData = [
-    ['持ち出しリスト'],
-    ['案件名', project],
-    ['担当者', rows[0]?.staff || ''],
-    ['日付', rows[0]?.date || ''],
-    [],
-    ['機材名', '数量', '備考'],
-    ...rows.map(r => [r.model, r.qty, r.note]),
-  ];
-  const ws = XLSX.utils.aoa_to_sheet(sheetData);
-  ws['!cols'] = [{wch:30},{wch:8},{wch:20}];
-  XLSX.utils.book_append_sheet(wb, ws, '持ち出しリスト');
-  XLSX.writeFile(wb, `持ち出しリスト_${project}.xlsx`);
+function downloadHistoryPickupList(project, dateKey) {
+  // Dropboxの持ち出しリスト現物（受注書コピー＋転記済み）をダウンロード
+  downloadPickupList(project, dateKey || '');
 }
 
 function switchTab(tab, el) {
   currentTab = tab;
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
-  el.classList.add('on');
+  // 上部タブ＋スマホ下部ボトムナビの両方を data-tab で同期
+  document.querySelectorAll('[data-tab]').forEach(t => t.classList.toggle('on', t.dataset.tab === tab));
   ['all','inventory','out','special','reserve','history','dashboard'].forEach(t => {
     const v = document.getElementById('view-'+t);
     if (v) v.style.display = t===tab ? 'block' : 'none';
@@ -475,6 +606,8 @@ function switchTab(tab, el) {
   render();
   if (tab === 'dashboard') { renderDashboard(); fetchShiftFile(); }
   if (tab === 'all') { renderTopPage(); fetchStaffShiftFile(); }
+  // ビュー切替時は最上部へスクロール（スマホで見やすく）
+  window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
 }
 
 function toggleGroup(head) {
@@ -485,18 +618,20 @@ function toggleGroup(head) {
   chevron.style.transform = isOpen ? 'rotate(-90deg)' : '';
 }
 
-function bulkReturn(project, e) {
-  e.stopPropagation();
+function bulkReturn(project, dateKey, e) {
+  if (e) e.stopPropagation();
+  if (dateKey && typeof dateKey === 'object') { e = dateKey; dateKey = ''; }
   if (!confirm(`「${project}」の機材を全て返却しますか？`)) return;
   const now = new Date().toLocaleString('ja-JP');
-  outItems.filter(o => (o.project||'（案件名未入力）') === project).forEach(o => {
+  const match = o => (o.project||'（案件名未入力）') === project && (!dateKey || dateKeyOf(o.dateOut) === dateKey);
+  outItems.filter(match).forEach(o => {
     if (o.invIdx >= 0 && o.invIdx < inv.length) {
       inv[o.invIdx].out = Math.max(0, inv[o.invIdx].out - o.qty);
     }
     history.push({date:now, project:o.project, staff:o.staff, model:o.model, qty:o.qty, action:'一括返却', note:''});
   });
   for (let i = outItems.length-1; i >= 0; i--) {
-    if ((outItems[i].project||'（案件名未入力）') === project) outItems.splice(i,1);
+    if (match(outItems[i])) outItems.splice(i,1);
   }
   render();
 
@@ -511,7 +646,6 @@ function bulkReturn(project, e) {
         if (json.updated === 0) {
           alert('⚠️ スプレッドシートで該当案件が見つかりませんでした。\n案件名: ' + json.project);
         }
-        localStorage.removeItem(CACHE_KEY);
         fetchFromSpreadsheet();
       } else {
         alert('返却の保存に失敗しました。再度お試しください。');
@@ -523,7 +657,7 @@ function bulkReturn(project, e) {
       delete window[cbName2]; script2.remove();
       alert('返却の保存に失敗しました。再度お試しください。');
     };
-    script2.src = GAS_API_URL + '?action=return&project=' + encodeURIComponent(project) + '&callback=' + cbName2;
+    script2.src = GAS_API_URL + '?action=return&project=' + encodeURIComponent(project) + (dateKey ? '&dateKey=' + dateKey : '') + '&callback=' + cbName2;
     document.body.appendChild(script2);
   }
 }
@@ -573,6 +707,55 @@ function doCheckout() {
     script.src = GAS_API_URL + '?' + params.toString();
     document.body.appendChild(script);
   }
+}
+
+// ===== 拠点間 貸出 =====
+function openLoan(idx) {
+  loanIdx = idx; const item = inv[idx];
+  document.getElementById('loan-item').value = `${item.maker} ${item.model}`;
+  document.getElementById('loan-avail').textContent = avail(item);
+  document.getElementById('loan-qty').value = 1;
+  document.getElementById('loan-qty').max = avail(item);
+  document.getElementById('loan-staff').value = '';
+  document.getElementById('loan-ret').value = '';
+  openModal('modal-loan');
+}
+function doLoan() {
+  const item = inv[loanIdx], qty = parseInt(document.getElementById('loan-qty').value)||0;
+  const staff = document.getElementById('loan-staff').value;
+  const ret = document.getElementById('loan-ret').value;
+  if (qty<1 || qty>avail(item)) { alert('数量が無効です'); return; }
+  if (!GAS_API_URL || GAS_API_URL==='ここにGASのURLを貼り付け') { alert('GAS未設定'); return; }
+  const cbName = 'loanCb_' + Date.now();
+  const params = new URLSearchParams({
+    action:'loan', model:item.maker+' '+item.model, qty:qty,
+    staff:staff||'', dateReturn:ret||'', dest:'大阪', callback:cbName,
+  });
+  window[cbName] = function(json) {
+    delete window[cbName];
+    document.getElementById('jsonp_'+cbName)?.remove();
+    if (json.status !== 'ok') { alert('⚠️ ' + (json.message||'貸出失敗')); return; }
+    closeModal('modal-loan');
+    reloadData();
+  };
+  const script = document.createElement('script');
+  script.id = 'jsonp_'+cbName;
+  script.src = GAS_API_URL + '?' + params.toString();
+  document.body.appendChild(script);
+}
+function loanReturn(loanId) {
+  if (!confirm('この貸出を返却しますか？（東京の在庫が戻り、大阪の借用中からも消えます）')) return;
+  const cbName = 'loanRetCb_' + Date.now();
+  window[cbName] = function(json) {
+    delete window[cbName];
+    document.getElementById('jsonp_'+cbName)?.remove();
+    if (json.status !== 'ok') { alert('⚠️ ' + (json.message||'返却失敗')); return; }
+    reloadData();
+  };
+  const script = document.createElement('script');
+  script.id = 'jsonp_'+cbName;
+  script.src = GAS_API_URL + '?action=loan_return&loanId=' + encodeURIComponent(loanId) + '&callback=' + cbName;
+  document.body.appendChild(script);
 }
 
 function openReturn(idx) {
@@ -743,31 +926,61 @@ function deleteItem(idx) {
 
 
 
-function showProjectDetail(project, ev) {
+function fmtDateDisp(str) {
+  if (!str) return '—';
+  const d = parseDate(str);
+  if (!d) return String(str).replace(/　/g, ' ');
+  let s = `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;
+  if (d.getHours() || d.getMinutes()) s += ` ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
+  return s;
+}
+
+function showProjectDetail(project, dateKey, ev) {
   if (ev) ev.stopPropagation();
-  const projectItems = outItems.filter(function(o) {
-    return (o.project || '（案件名未入力）') === project;
-  });
-  const histItems = history.filter(function(h) {
-    return (h.project || '（案件名未入力）') === project;
-  });
-  const items = projectItems.length > 0 ? projectItems : histItems;
+  if (dateKey && typeof dateKey === 'object') { ev = dateKey; dateKey = ''; } // 旧呼び出し互換
+  const matchKey = p => (p || '（案件名未入力）') === project;
+  const matchDate = o => !dateKey || dateKeyOf(o.dateOut || o.date) === dateKey;
+  const projectItems = outItems.filter(o => matchKey(o.project) && matchDate(o));
+  // 予約中の機材（itemName→model, dateReturn→returnDate に正規化）
+  const resItems = (reservations || []).filter(r => matchKey(r.project) && (!dateKey || dateKeyOf(r.dateOut) === dateKey)).map(r => ({
+    model: r.itemName, qty: r.qty, category: r.category, note: r.note,
+    dateOut: r.dateOut, returnDate: r.dateReturn, staff: r.staff, vehicle: r.vehicle, date: r.dateOut
+  }));
+  const histItems = history.filter(h => matchKey(h.project)); // 履歴は搬入日が無いので案件名のみ
+  const items = projectItems.length > 0 ? projectItems : (resItems.length > 0 ? resItems : histItems);
   if (!items.length) return;
 
-  const dateOut = items[0].dateOut || items[0].date || '—';
-  const dateRet = items[0].returnDate || items[0].dateReturn || '—';
+  const dateOut = fmtDateDisp(items[0].dateOut || items[0].date);
+  const dateRet = fmtDateDisp(items[0].returnDate || items[0].dateReturn);
   const staff   = items[0].staff || '—';
   const vehicle = items[0].vehicle || '';
+  pdProject = project;
+  pdDateKey = dateKey || dateKeyOf(items[0].dateOut || items[0].date);
+  // タイトルに搬入日を付けて同名現場を区別
+  const _d = parseDate(items[0].dateOut || items[0].date);
+  const _md = _d ? `（${_d.getMonth()+1}/${_d.getDate()}）` : '';
 
-  const ownItems    = items.filter(function(o) { return o.note !== '[レンタル]'; });
+  const ownItems    = items.filter(function(o) { return o.note !== '[レンタル]' && o.note !== '(在庫管理外)'; });
   const rentalItems = items.filter(function(o) { return o.note === '[レンタル]'; });
+  const freeItems   = items.filter(function(o) { return o.note === '(在庫管理外)'; });
   const makeItemRow = function(o) {
     return '<div class="proj-item-row"><span class="proj-item-name">' + escHtml(o.model||'') + '</span><span class="proj-item-qty">×' + o.qty + '</span></div>';
   };
-  const itemRows = ownItems.map(makeItemRow).join('') +
-    (rentalItems.length ? '<div style="border-top:1px dashed var(--border2);margin:6px 0;font-size:10px;color:var(--text2);padding-top:4px">レンタル品</div>' + rentalItems.map(makeItemRow).join('') : '');
+  // エクセルの読み込み順（セクション→A-D→G-J→M-P）を保ち、カテゴリが変わったら見出しを出す
+  const groupByCat = function(list) {
+    let html = '', last = null;
+    list.forEach(function(o) {
+      const c = o.category || 'その他';
+      if (c !== last) { html += '<div class="pd-cat-head">' + escHtml(c) + '</div>'; last = c; }
+      html += makeItemRow(o);
+    });
+    return html;
+  };
+  const itemRows = groupByCat(ownItems) +
+    (rentalItems.length ? '<div class="pd-cat-head pd-cat-rental">レンタル品</div>' + rentalItems.map(makeItemRow).join('') : '') +
+    (freeItems.length ? '<div class="pd-cat-head pd-cat-free">備考（フリー機材）</div>' + freeItems.map(makeItemRow).join('') : '');
 
-  document.getElementById('pd-project').textContent = project;
+  document.getElementById('pd-project').textContent = project + _md;
   document.getElementById('pd-staff').textContent   = staff;
   document.getElementById('pd-dateout').textContent = dateOut;
   document.getElementById('pd-dateret').textContent = dateRet;
@@ -890,9 +1103,8 @@ function showLoading(on) {
   }
 }
 
-const CACHE_KEY = 'kizai_data_cache';
-function saveCache(json) { try { localStorage.setItem(CACHE_KEY, JSON.stringify(json)); } catch(e) {} }
-function loadCache()     { try { return JSON.parse(localStorage.getItem(CACHE_KEY)); } catch(e) { return null; } }
+// キャッシュ廃止（常にGASから最新データを取得）
+try { localStorage.removeItem('kizai_data_cache'); } catch(e) {}
 
 function applyData(json) {
   if (json.inventory && json.inventory.length > 0) {
@@ -932,11 +1144,13 @@ function applyData(json) {
           qty:        parseInt(r.qty) || 0,
           project:    String(r.project    || ''),
           staff:      String(r.staff      || ''),
+          category:   String(r.category   || ''),
           dateOut:    String(r.dateOut    || ''),
           returnDate: String(r.dateReturn || ''),
           date:       String(r.date       || ''),
           vehicle:    String(r.vehicle    || ''),
           note:       String(r.note       || ''),
+          maker:      String(r.maker      || ''),
         };
       });
 
@@ -958,19 +1172,27 @@ function applyData(json) {
     if (currentTab === 'reserve') renderReservations();
   }
 
-  borrowed = json.borrowed || [];
-  renderBorrowed();
+  loans = json.loans || [];
+  if (currentTab === 'out') renderOut();
+
+  rentalRanking = json.rentalRanking || [];
+  conflicts = json.conflicts || [];
+  renderConflictBanner();
+  if (currentTab === 'dashboard') renderDashboard();
 
   if (json.history && json.history.length > 0) {
     const gasHistory = json.history.map(function(h) {
       return {
-        date:    h.date    || '',
-        project: h.project || '',
-        staff:   h.staff   || '',
-        model:   h.model   || '',
-        qty:     parseInt(h.qty) || 0,
-        action:  h.action  || 'OUT',
-        note:    h.note    || '',
+        date:     h.date     || '',
+        project:  h.project  || '',
+        staff:    h.staff    || '',
+        model:    h.model    || '',
+        qty:      parseInt(h.qty) || 0,
+        action:   h.action   || 'OUT',
+        note:     h.note     || '',
+        category: h.category || '',
+        kind:     h.kind     || '',
+        maker:    h.maker    || '',
       };
     });
     const existingModels = new Set(gasHistory.map(function(h) { return h.date + h.model; }));
@@ -988,15 +1210,6 @@ function fetchFromSpreadsheet() {
     return;
   }
 
-  // キャッシュがあれば即表示してローディングを隠す
-  const cached = loadCache();
-  if (cached) {
-    applyData(cached);
-    render();
-    if (currentTab === 'dashboard') renderDashboard();
-    showLoading(false);
-    document.getElementById('cache-banner').classList.add('show');
-  }
   fetchShiftFile();
   fetchStaffShiftFile();
 
@@ -1007,12 +1220,9 @@ function fetchFromSpreadsheet() {
     if (el) el.remove();
 
     applyData(json);
-    saveCache(json);
-
     render();
     if (currentTab === 'dashboard') renderDashboard();
     showLoading(false);
-    document.getElementById('cache-banner').classList.remove('show');
   };
 
   const script = document.createElement('script');
@@ -1022,7 +1232,7 @@ function fetchFromSpreadsheet() {
     console.error('GAS接続エラー');
     delete window[cbName];
     script.remove();
-    if (!cached) render();
+    render();
     showLoading(false);
   };
   document.body.appendChild(script);
@@ -1038,6 +1248,14 @@ function changeCalMonth(delta) {
   calOffset = Math.max(-6, Math.min(6, calOffset + delta));
   if (currentTab === 'all') renderTopPage();
   else renderDashboard();
+}
+
+function renderConflictBanner() {
+  const el = document.getElementById('conflict-banner');
+  if (!el) return;
+  if (!conflicts || !conflicts.length) { el.innerHTML = ''; return; }
+  const items = conflicts.map(c => `${escHtml(c.model)}（${c.shortage}不足）`).join('、');
+  el.innerHTML = `<div class="conflict-alert" onclick="switchTab('dashboard',document.querySelector('.tab:last-child'))"><i class="ti ti-alert-triangle"></i> <strong>予約重複で在庫超過：</strong>${items}<span style="opacity:.75"> — タップで詳細</span></div>`;
 }
 
 function renderDashboard() {
@@ -1123,7 +1341,8 @@ function renderDashboard() {
       const isRet = e.startsWith('返却');
       const proj = isRet ? e.replace('返却: ','') : e;
       const label = e.length > 8 ? e.slice(0,8)+'…' : e;
-      return '<div class="cal-event' + (isRet?' ret':'') + '" data-project="' + proj.replace(/"/g,'&quot;') + '" onclick="showProjectDetail(this.dataset.project,event)" style="cursor:pointer">' + label + '</div>';
+      const _dk = isRet ? '' : (year + String(month+1).padStart(2,'0') + String(d).padStart(2,'0'));
+      return '<div class="cal-event' + (isRet?' ret':'') + '" data-project="' + proj.replace(/"/g,'&quot;') + '" data-datekey="' + _dk + '" onclick="showProjectDetail(this.dataset.project,this.dataset.datekey,event)" style="cursor:pointer">' + label + '</div>';
     }).join('');
     calCells += `<div class="cal-cell${isToday ? ' today' : ''}${events.length ? ' has-event' : ''}">
       <span class="cal-day">${d}</span>
@@ -1144,13 +1363,49 @@ function renderDashboard() {
     </div>`;
   }).join('') : `<div style="text-align:center;padding:2rem;color:var(--text2);font-size:13px">在庫不足の記録がありません</div>`;
 
-  container.innerHTML = `
+  // レンタル品ランキング（自社以外から借りた機材。拠点間貸出は除外）
+  const rentTop = (rentalRanking || []).slice(0, 10);
+  const rentMax = rentTop.length ? rentTop[0].count : 1;
+  const rentRows = rentTop.length ? rentTop.map((r, i) => {
+    const pct = Math.round(r.count / rentMax * 100);
+    return `<div class="rep-row">
+      <span class="rep-rank">${i+1}</span>
+      <span class="rep-name">${escHtml(r.model)}${r.companies?`<span style="color:var(--text2);font-size:10px"> / ${escHtml(r.companies)}</span>`:''}</span>
+      <div class="rep-bar-wrap"><div class="rep-bar" style="width:${pct}%;background:var(--warn-text)"></div></div>
+      <span class="rep-count">${r.count}回</span>
+    </div>`;
+  }).join('') : `<div style="text-align:center;padding:2rem;color:var(--text2);font-size:13px">レンタルの記録がありません</div>`;
+
+  // 予約重複（在庫超過）アラート
+  const conflictCard = (conflicts && conflicts.length) ? `
+    <div class="dash-card" style="margin-bottom:14px;border:1px solid var(--danger-text)">
+      <div class="dash-card-head" style="color:var(--danger-text)">
+        <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+        <span>予約重複で在庫超過（${conflicts.length}件）</span>
+      </div>
+      <div style="font-size:11px;color:var(--text2);padding:0 4px 6px">同じ機材を期間（日時）が重なって予約/持ち出ししています</div>
+      ${conflicts.map(c => `
+        <div style="padding:8px 4px;border-bottom:0.5px solid var(--border)">
+          <div style="font-weight:700;font-size:13px">${escHtml(c.model)} <span style="color:var(--danger-text)">必要${c.peak} / 総数${c.total}（${c.shortage}個不足）</span></div>
+          ${c.bookings.map(b => `<div style="font-size:11px;color:var(--text2);margin-top:2px">・${escHtml(b.project||'（未入力）')} ×${b.qty}　${escHtml(fmtDateDisp(b.dateOut))} 〜 ${escHtml(fmtDateDisp(b.dateReturn))}</div>`).join('')}
+        </div>`).join('')}
+    </div>` : '';
+
+  container.innerHTML = conflictCard + `
     <div class="dash-card">
       <div class="dash-card-head">
         <i class="ti ti-chart-bar" aria-hidden="true"></i>
         <span>在庫不足 TOP${top10.length}</span>
       </div>
       <div class="rep-list">${reportRows}</div>
+    </div>
+    <div class="dash-card" style="margin-top:14px">
+      <div class="dash-card-head">
+        <i class="ti ti-building-store" aria-hidden="true"></i>
+        <span>レンタル品 TOP${rentTop.length}（購入検討の参考）</span>
+      </div>
+      <div style="font-size:11px;color:var(--text2);padding:0 4px 6px">自社以外から借りた回数が多い機材（拠点間貸出は除く）</div>
+      <div class="rep-list">${rentRows}</div>
     </div>
   `;
 }
@@ -1175,38 +1430,27 @@ function checkAutoReturn() {
   render();
 }
 
-function downloadPickupList(project, event) {
+function downloadPickupList(project, dateKey, event) {
   if (event) event.stopPropagation();
+  if (!project) { alert('案件を選択してください'); return; }
   const cbName = 'pickupCallback_' + Date.now();
   window[cbName] = function(json) {
     delete window[cbName];
     const el = document.getElementById('jsonp_' + cbName);
     if (el) el.remove();
     if (json.status !== 'ok') { alert('取得失敗: ' + (json.message || 'エラー')); return; }
-    const items = json.items || [];
-    if (!items.length) { alert('持ち出し中の機材がありません'); return; }
-    const meta = items[0];
-    const wb = XLSX.utils.book_new();
-    const header = [['案件名', meta.project || ''], ['担当者', meta.staff || ''],
-      ['搬入予定', meta.dateOut || ''], ['返却予定', meta.dateReturn || ''],
-      ['車両', meta.vehicle || ''], [],
-      ['カテゴリ', '機材名', '数量', '備考']];
-    const rows = items.map(it => [it.category || '', it.itemName || '', it.qty || 0, it.note || '']);
-    const ws = XLSX.utils.aoa_to_sheet([...header, ...rows]);
-    ws['!cols'] = [{wch:14},{wch:28},{wch:8},{wch:20}];
-    XLSX.utils.book_append_sheet(wb, ws, '持ち出しリスト');
-    const wbout = XLSX.write(wb, {bookType:'xlsx', type:'array'});
-    const blob = new Blob([wbout], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    // Dropboxの持ち出しリスト現物（受注書コピー＋転記済み）をそのままダウンロード
+    const bytes = Uint8Array.from(atob(json.data), c => c.charCodeAt(0));
+    const blob = new Blob([bytes], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = json.filename || '持ち出しリスト.xlsx';
+    a.download = json.filename || ('持ち出しリスト_' + project + '.xlsx');
     a.click();
     URL.revokeObjectURL(a.href);
   };
   const script = document.createElement('script');
   script.id = 'jsonp_' + cbName;
-  const projectParam = project ? '&project=' + encodeURIComponent(project) : '';
-  script.src = GAS_API_URL + '?action=pickuplist&callback=' + cbName + projectParam;
+  script.src = GAS_API_URL + '?action=pickupfile&callback=' + cbName + '&project=' + encodeURIComponent(project) + (dateKey ? '&dateKey=' + encodeURIComponent(dateKey) : '');
   script.onerror = function() {
     delete window[cbName]; script.remove();
     alert('取得に失敗しました');
@@ -1215,23 +1459,6 @@ function downloadPickupList(project, event) {
 }
 
 let reservations = [];
-let borrowed = [];
-
-function renderBorrowed() {
-  const el = document.getElementById('borrowed-banner');
-  if (!el) return;
-  if (!borrowed || !borrowed.length) { el.innerHTML = ''; return; }
-  const rows = borrowed.map(b => `
-    <div class="proj-item-row">
-      <span class="proj-item-name">${escHtml(b.model)} <span style="color:var(--text2);font-size:11px">（${escHtml(b.from||'大阪')}より${b.dateReturn?' / 返却 '+escHtml(b.dateReturn):''}）</span></span>
-      <span class="proj-item-qty">×${b.qty}</span>
-    </div>`).join('');
-  el.innerHTML = `
-    <div class="dash-card" style="margin-bottom:12px;border-left:3px solid var(--info-text)">
-      <div class="dash-card-head"><i class="ti ti-truck-loading" style="color:var(--info-text)"></i> <span>他拠点から借用中（${borrowed.length}件）</span></div>
-      <div style="padding:4px 0">${rows}</div>
-    </div>`;
-}
 let shortageData = {};
 
 // ============================================================
@@ -1387,40 +1614,32 @@ function renderTopPage() {
 
   const dateMap = {};
   const addToMap = (dateStr, label, isRet) => {
-    try {
-      const d = new Date(dateStr);
-      if (isNaN(d)) return;
+    const d = parseDate(dateStr);
+    if (!d) return;
+    const key = d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
+    if (!dateMap[key]) dateMap[key] = [];
+    const entry = isRet ? '返却: ' + label : label;
+    if (!dateMap[key].includes(entry)) dateMap[key].push(entry);
+  };
+  outItems.forEach(o => {
+    // 持ち出し日は搬入予定(dateOut)を優先（処理日時dateではなく）
+    const d = parseDate(o.dateOut || o.date);
+    if (d) {
       const key = d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
       if (!dateMap[key]) dateMap[key] = [];
-      const entry = isRet ? '返却: ' + label : label;
-      if (!dateMap[key].includes(entry)) dateMap[key].push(entry);
-    } catch(e) {}
-  };
-  history.forEach(h => { if (h.project) addToMap(h.date, h.project, false); });
-  outItems.forEach(o => {
-    if (o.date || o.dateOut) {
-      try {
-        const d = new Date(o.date || o.dateOut);
-        if (!isNaN(d)) {
-          const key = d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
-          if (!dateMap[key]) dateMap[key] = [];
-          const proj = o.project || '（案件名未入力）';
-          if (!dateMap[key].includes(proj)) dateMap[key].push(proj);
-        }
-      } catch(e) {}
+      const proj = o.project || '（案件名未入力）';
+      if (!dateMap[key].includes(proj)) dateMap[key].push(proj);
     }
-    if (o.returnDate) {
-      try {
-        const rd = new Date(o.returnDate);
-        if (!isNaN(rd)) {
-          const rkey = rd.getFullYear() + '-' + (rd.getMonth()+1) + '-' + rd.getDate();
-          if (!dateMap[rkey]) dateMap[rkey] = [];
-          const retLabel = '返却: ' + (o.project || '未入力');
-          if (!dateMap[rkey].includes(retLabel)) dateMap[rkey].push(retLabel);
-        }
-      } catch(e) {}
+    const rd = parseDate(o.returnDate);
+    if (rd) {
+      const rkey = rd.getFullYear() + '-' + (rd.getMonth()+1) + '-' + rd.getDate();
+      if (!dateMap[rkey]) dateMap[rkey] = [];
+      const retLabel = '返却: ' + (o.project || '未入力');
+      if (!dateMap[rkey].includes(retLabel)) dateMap[rkey].push(retLabel);
     }
   });
+  // 予約も持ち出し日にマップ
+  (reservations || []).forEach(r => { if (r.project) addToMap(r.dateOut, r.project, false); });
 
   const monthNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
   const dayNames = ['日','月','火','水','木','金','土'];
@@ -1435,7 +1654,8 @@ function renderTopPage() {
       const isRet = e.startsWith('返却');
       const proj = isRet ? e.replace('返却: ','') : e;
       const label = e.length > 8 ? e.slice(0,8)+'…' : e;
-      return '<div class="cal-event' + (isRet?' ret':'') + '" data-project="' + proj.replace(/"/g,'&quot;') + '" onclick="showProjectDetail(this.dataset.project,event)" style="cursor:pointer">' + label + '</div>';
+      const _dk = isRet ? '' : (year + String(month+1).padStart(2,'0') + String(d).padStart(2,'0'));
+      return '<div class="cal-event' + (isRet?' ret':'') + '" data-project="' + proj.replace(/"/g,'&quot;') + '" data-datekey="' + _dk + '" onclick="showProjectDetail(this.dataset.project,this.dataset.datekey,event)" style="cursor:pointer">' + label + '</div>';
     }).join('');
     calCells += `<div class="cal-cell${isToday?' today':''}${events.length?' has-event':''}"><span class="cal-day">${d}</span>${eventDots}</div>`;
   }
@@ -1469,7 +1689,9 @@ function renderTopPage() {
     const dateLabel = d => {
       const dd = new Date(d);
       if (isNaN(dd)) return '';
-      const diff = Math.round((dd - today) / 86400000);
+      // 時刻部分を切り捨てて純粋な日付差で計算（搬入時刻に左右されない）
+      const ddDay = new Date(dd.getFullYear(), dd.getMonth(), dd.getDate());
+      const diff = Math.round((ddDay - today) / 86400000);
       const label = diff === 0 ? '今日' : diff === 1 ? '明日' : `${diff}日後`;
       return `${dd.getMonth()+1}/${dd.getDate()}（${['日','月','火','水','木','金','土'][dd.getDay()]}）${label}`;
     };
@@ -1477,15 +1699,15 @@ function renderTopPage() {
     // reservations（予約）＋ outItems（持ち出し中）の返却予定を合算
     const items = [];
     (reservations || []).forEach(r => {
-      const d = new Date(r.dateOut);
-      if (!isNaN(d) && d >= today && d <= week) {
-        items.push({ date: d, project: r.project || '（未入力）', staff: r.staff || '', items: r.itemName || '', type: 'reserve' });
+      const d = parseDate(r.dateOut);
+      if (d && d >= today && d <= week) {
+        items.push({ date: d, project: r.project || '（未入力）', staff: r.staff || '', items: r.itemName || '', type: 'reserve', dateKey: dateKeyOf(r.dateOut) });
       }
     });
     (outItems || []).forEach(o => {
-      const d = new Date(o.dateReturn || o.dateOut);
-      if (!isNaN(d) && d >= today && d <= week) {
-        items.push({ date: d, project: o.project || '（未入力）', staff: o.staff || '', items: o.itemName || '', type: 'out' });
+      const d = parseDate(o.returnDate || o.dateReturn || o.dateOut);
+      if (d && d >= today && d <= week) {
+        items.push({ date: d, project: o.project || '（未入力）', staff: o.staff || '', items: o.itemName || '', type: 'out', dateKey: dateKeyOf(o.dateOut) });
       }
     });
     items.sort((a,b) => a.date - b.date);
@@ -1503,7 +1725,7 @@ function renderTopPage() {
       upcomingEl.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text2);font-size:13px">今後1週間の予約はありません</div>';
     } else {
       upcomingEl.innerHTML = rows.map(r => `
-        <div style="padding:10px 12px;border-bottom:0.5px solid var(--border);display:flex;gap:10px;align-items:flex-start;cursor:pointer" onclick="showProjectDetail(${JSON.stringify(r.project)})">
+        <div style="padding:10px 12px;border-bottom:0.5px solid var(--border);display:flex;gap:10px;align-items:flex-start;cursor:pointer" data-project="${escHtml(r.project)}" data-datekey="${r.dateKey||''}" onclick="showProjectDetail(this.dataset.project,this.dataset.datekey,event)">
           <div style="background:${r.type==='reserve'?'var(--info-bg)':'var(--warn-bg)'};color:${r.type==='reserve'?'var(--info-text)':'var(--warn-text)'};border-radius:6px;padding:4px 8px;font-size:10px;font-weight:700;white-space:nowrap;flex-shrink:0">${dateLabel(r.date)}</div>
           <div style="flex:1;min-width:0">
             <div style="font-size:13px;font-weight:600;color:var(--text);text-decoration:underline;text-underline-offset:2px">${escHtml(r.project)}</div>
@@ -1541,29 +1763,51 @@ function renderReservations() {
   }
   const groups = {};
   reservations.forEach(r => {
-    const key = r.project || '（案件名未入力）';
-    if (!groups[key]) groups[key] = { items: [], staff: r.staff, dateOut: r.dateOut, dateReturn: r.dateReturn, vehicle: r.vehicle || '' };
+    const proj = r.project || '（案件名未入力）';
+    const dk = dateKeyOf(r.dateOut);
+    const key = proj + '｜' + dk;  // 同名現場でも搬入日で分ける
+    if (!groups[key]) groups[key] = { items: [], project: proj, dateKey: dk, staff: r.staff, dateOut: r.dateOut, dateReturn: r.dateReturn, vehicle: r.vehicle || '' };
     groups[key].items.push(r);
   });
-  container.innerHTML = Object.entries(groups).map(([project, g]) => {
-    const rows = g.items.map(r => `
+  container.innerHTML = Object.values(groups).map(g => {
+    const project = g.project;
+    const _d = parseDate(g.dateOut);
+    const _md = _d ? `（${_d.getMonth()+1}/${_d.getDate()}）` : '';
+    const makeRow = r => {
+      const mkLabel = (r.note === '[レンタル]' && r.maker) ? `<span style="font-size:10px;color:var(--info-text);margin-left:6px">（${escHtml(r.maker)}）</span>` : '';
+      return `
       <div class="proj-item-row">
-        <span class="proj-item-name">${escHtml(r.itemName || r.model || '')}</span>
+        <span class="proj-item-name">${escHtml(r.itemName || r.model || '')}${mkLabel}</span>
         <span class="proj-item-qty">×${r.qty}</span>
-      </div>`).join('');
+      </div>`;
+    };
+    const own    = g.items.filter(r => r.note !== '[レンタル]' && r.note !== '(在庫管理外)');
+    const rental = g.items.filter(r => r.note === '[レンタル]');
+    const free   = g.items.filter(r => r.note === '(在庫管理外)');
+    const groupByCat = list => {
+      let html = '', last = null;
+      list.forEach(r => { const c = r.category || 'その他'; if (c !== last) { html += `<div class="pd-cat-head">${escHtml(c)}</div>`; last = c; } html += makeRow(r); });
+      return html;
+    };
+    const rows = groupByCat(own) +
+      (rental.length ? `<div class="pd-cat-head pd-cat-rental">レンタル品</div>` + rental.map(makeRow).join('') : '') +
+      (free.length ? `<div class="pd-cat-head pd-cat-free">備考（フリー機材）</div>` + free.map(makeRow).join('') : '');
     return `
       <div class="proj-group">
         <div class="proj-group-head" onclick="toggleGroup(this)">
           <div class="proj-group-left">
             <i class="ti ti-chevron-down proj-chevron"></i>
-            <span class="proj-group-name">${escHtml(project)}</span>
+            <span class="proj-group-name">${escHtml(project)}${_md}${loanBadge(project)}</span>
             <span class="proj-group-meta">${escHtml(g.staff||'担当未入力')}</span>
             <span class="badge s-info" style="font-size:10px"><i class="ti ti-calendar"></i> 搬入 ${escHtml(g.dateOut)}</span>
             ${g.vehicle ? `<span class="badge" style="font-size:10px;background:var(--border);color:var(--text2)"><i class="ti ti-car"></i> ${escHtml(g.vehicle)}</span>` : ''}
           </div>
           <div class="proj-group-right">
             <span class="proj-count">${g.items.length}品目</span>
-            <button class="act" style="color:var(--danger-text)" onclick="cancelReservation('${project.replace(/'/g,"\\'")}',event)">
+            <button class="act" style="font-size:11px" onclick="downloadPickupList('${project.replace(/'/g,"\\'")}','${g.dateKey}',event)">
+              <i class="ti ti-file-download"></i> DL
+            </button>
+            <button class="act" style="color:var(--danger-text)" onclick="cancelReservation('${project.replace(/'/g,"\\'")}','${g.dateKey}',event)">
               <i class="ti ti-x"></i> キャンセル
             </button>
           </div>
@@ -1573,17 +1817,22 @@ function renderReservations() {
   }).join('');
 }
 
-function cancelReservation(project, e) {
-  e.stopPropagation();
+function cancelReservation(project, dateKey, e) {
+  if (e) e.stopPropagation();
+  if (dateKey && typeof dateKey === 'object') { e = dateKey; dateKey = ''; }
   if (!confirm(`「${project}」の予約をキャンセルしますか？`)) return;
-  reservations = reservations.filter(r => (r.project || '（案件名未入力）') !== project);
+  reservations = reservations.filter(r => !((r.project || '（案件名未入力）') === project && (!dateKey || dateKeyOf(r.dateOut) === dateKey)));
   renderReservations();
   if (GAS_API_URL && GAS_API_URL !== 'ここにGASのURLを貼り付け') {
     const cbName = 'cancelCb_' + Date.now();
-    window[cbName] = function(json) { delete window[cbName]; document.getElementById('jsonp_'+cbName)?.remove(); };
+    window[cbName] = function(json) {
+      delete window[cbName];
+      document.getElementById('jsonp_'+cbName)?.remove();
+      fetchFromSpreadsheet();
+    };
     const script = document.createElement('script');
     script.id = 'jsonp_' + cbName;
-    script.src = GAS_API_URL + '?action=cancel_reservation&project=' + encodeURIComponent(project) + '&callback=' + cbName;
+    script.src = GAS_API_URL + '?action=cancel_reservation&project=' + encodeURIComponent(project) + (dateKey ? '&dateKey=' + dateKey : '') + '&callback=' + cbName;
     document.body.appendChild(script);
   }
 }
