@@ -1,4 +1,15 @@
-const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbzDee57zJG_9_9G-wTEaSglONOdeQU_mJh8tMjIlfvMqQ2bkGLTWHpcaDUvuKe8Y9sWOg/exec';
+// 接続先バックエンドを実行環境で自動切替（本番ドメイン=本番GAS / Vercelプレビュー・ローカル=テストGAS）
+const GAS_PROD    = 'https://script.google.com/macros/s/AKfycbzMqsT8BLQvl8C1-VORWTyv1cPjRZtN0UIFh-NiAIZv1eqApo0Np_vrCW5PknLnGWLD/exec';
+const GAS_STAGING = 'https://script.google.com/macros/s/AKfycbyo6KmMkvvZx4C-sfL90SSADdqh2c4M-fggdH0BddSbNODyd0K--nfRrpZn2OTUEfcq/exec';
+// 本番: 独自ドメイン(kizai-kanri-virid) と main別名(-git-main-) は本番GAS。
+// テスト: dev等のブランチプレビュー(-git-xxx-) と ローカル は テストGAS。
+const _host = location.hostname;
+const _isLocal = _host === 'localhost' || _host === '127.0.0.1';
+const _isBranchPreview = _host.includes('-git-') && !_host.includes('-git-main-');
+const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbzDee57zJG_9_9G-wTEaSglONOdeQU_mJh8tMjIlfvMqQ2bkGLTWHpcaDUvuKe8Y9sWOg/exec'; // 東京拠点GAS（固定）
+
+// ★アプリの版番号（画面表示用）。デプロイのたびに service-worker.js の CACHE_NAME と揃えて上げる
+const APP_VERSION = 'v47';
 
 const SC = {
   'IN':        {cls:'s-in',    icon:'ti-circle-check'},
@@ -172,6 +183,38 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// 車種→カレンダー色クラス（複数車両対応）
+const VEHICLE_COLORS = {
+  caravan: { bg: '#dbeafe', fg: '#1e40af' },
+  truck:   { bg: '#fef3c7', fg: '#92400e' },
+  rental:  { bg: '#dcfce7', fg: '#166534' },
+  other:   { bg: '#e5e7eb', fg: '#4b5563' },
+};
+function vehicleKinds(v) {
+  const s = String(v || '');
+  const kinds = [];
+  if (/キャラバン|caravan/i.test(s)) kinds.push('caravan');
+  if (/トラック|truck/i.test(s)) kinds.push('truck');
+  if (/レンタカー|レンタル|rental/i.test(s)) kinds.push('rental');
+  return kinds.length ? kinds : ['other'];
+}
+function vehicleClass(v) {
+  const k = vehicleKinds(v)[0];
+  return 'veh-' + k;
+}
+// カレンダーチップHTML生成（複数=2色以上のグラデーション、1つ=単色）
+function vehicleChipStyle(v) {
+  const kinds = vehicleKinds(v);
+  if (kinds.length === 1) return '';
+  const n = kinds.length;
+  const stops = kinds.map((k, i) => {
+    const from = Math.round(i * 100 / n);
+    const to   = Math.round((i + 1) * 100 / n);
+    return `${VEHICLE_COLORS[k].bg} ${from}% ${to}%`;
+  }).join(', ');
+  return `background:linear-gradient(90deg, ${stops});color:${VEHICLE_COLORS[kinds[0]].fg};`;
+}
+
 // 現場名に [貸出] [東京] が入っていたら貸出バッジを返す
 function loanBadge(projectName) {
   return /\[(貸出|東京|LOAN|loan)\]/i.test(String(projectName||''))
@@ -197,12 +240,21 @@ function renderStats() {
     repC=inv.filter(i=>calcSt(i)==='修理中').length,
     renC=inv.filter(i=>calcSt(i)==='レンタル中').length,
     absC=inv.filter(i=>calcSt(i)==='長期不在').length;
-  document.getElementById('stats').innerHTML=`
-    <div class="stat"><div class="stat-label">総品目数</div><div class="stat-val">${t}</div></div>
-    <div class="stat"><div class="stat-label">在庫中（IN）</div><div class="stat-val" style="color:var(--success-text)">${inC}</div></div>
-    <div class="stat"><div class="stat-label">持ち出し中</div><div class="stat-val" style="color:var(--danger-text)">${outC}</div></div>
-    <div class="stat"><div class="stat-label">修理・レンタル</div><div class="stat-val" style="color:var(--purple-text)">${repC+renC}</div></div>
-    <div class="stat"><div class="stat-label">長期不在</div><div class="stat-val" style="color:var(--gray-text)">${absC}</div></div>`;
+  const cards = [
+    { label:'総品目数',      val:t,         icon:'ti-package',        accent:'primary' },
+    { label:'在庫中（IN）',  val:inC,       icon:'ti-circle-check',   accent:'success' },
+    { label:'持ち出し中',    val:outC,      icon:'ti-arrow-up-right', accent:'danger' },
+    { label:'修理・レンタル', val:repC+renC, icon:'ti-tool',           accent:'purple' },
+    { label:'長期不在',      val:absC,      icon:'ti-clock-off',      accent:'gray' },
+  ];
+  document.getElementById('stats').innerHTML = cards.map(c => `
+    <div class="stat stat-${c.accent}">
+      <div class="stat-icon"><i class="ti ${c.icon}"></i></div>
+      <div class="stat-body">
+        <div class="stat-label">${c.label}</div>
+        <div class="stat-val">${c.val}</div>
+      </div>
+    </div>`).join('');
 }
 
 let currentCat = '';
@@ -308,6 +360,7 @@ function openItemDetail(idx) {
     (item.out>0?`<button class="btn" onclick="closeModal('modal-detail');openReturn(${idx})"><i class="ti ti-arrow-down-left"></i> 返却</button>`:'') +
     (av>0?`<button class="btn" onclick="closeModal('modal-detail');openSpecial(${idx})"><i class="ti ti-tool"></i> 特殊</button>`:'') +
     `<button class="btn" onclick="closeModal('modal-detail');openNoteModal(${idx})"><i class="ti ti-pencil"></i> 備考</button>` +
+    `<button class="btn" onclick="closeModal('modal-detail');openEditItem(${idx})"><i class="ti ti-edit"></i> 編集</button>` +
     `<button class="btn act d" onclick="closeModal('modal-detail');deleteItem(${idx})"><i class="ti ti-trash"></i></button>`;
   openModal('modal-detail');
 }
@@ -341,7 +394,7 @@ function renderOut() {
       return `
       <div class="proj-item-row">
         <span class="proj-item-name">${escHtml(String(o.model||''))}${mkLabel}</span>
-        <span class="proj-item-qty">×${o.qty}</span>
+        <span class="proj-item-qty">${(o.qty|0) > 0 ? '×'+(o.qty|0) : ''}</span>
         <button class="act" style="padding:3px 8px;font-size:11px" onclick="openReturnFromOut(${o.outIdx})">
           <i class="ti ti-arrow-down-left"></i> 返却
         </button>
@@ -483,7 +536,7 @@ function _renderHistoryInner(container) {
           <div class="proj-item-row">
             <span style="font-size:11px;color:var(--text2);min-width:120px">${h.date}</span>
             <span class="proj-item-name">${escHtml(String(h.model||''))}${makerLabel}</span>
-            <span class="proj-item-qty">×${h.qty}</span>
+            <span class="proj-item-qty">${(h.qty|0) > 0 ? '×'+(h.qty|0) : ''}</span>
             <span class="badge ${cls}" style="font-size:10px">${actionLabel}</span>
             <span style="font-size:11px;color:var(--text2)">${escHtml(h.note||'')}</span>
           </div>`;
@@ -541,26 +594,24 @@ function _renderHistoryInner(container) {
             </div>
             <div class="proj-group-right" style="display:flex;align-items:center;gap:8px">
               <button class="btn" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();downloadHistoryPickupList('${project.replace(/'/g,"\\'")}')"><i class="ti ti-file-download"></i> リストDL</button>
-              <span class="proj-count">${g.items.length}件</span>
             </div>
           </div>
           <div class="proj-group-body" style="display:none">${itemRows}</div>
         </div>`;
     }).join('');
 
-    const totalItems = Object.values(projects).reduce((s,g)=>s+g.items.length,0);
     return `
       <div class="proj-group" style="margin-bottom:10px">
         <div class="proj-group-head" onclick="toggleGroup(this)">
           <div class="proj-group-left">
-            <i class="ti ti-chevron-down proj-chevron"></i>
+            <i class="ti ti-chevron-down proj-chevron" style="transform:rotate(-90deg)"></i>
             <span class="proj-group-name"><i class="ti ti-calendar" style="font-size:14px;margin-right:4px"></i>${ym}</span>
           </div>
           <div class="proj-group-right">
-            <span class="proj-count">${Object.keys(projects).length}案件 / ${totalItems}件</span>
+            <span class="proj-count">${Object.keys(projects).length}案件</span>
           </div>
         </div>
-        <div class="proj-group-body" style="padding:6px 8px">${projectRows}</div>
+        <div class="proj-group-body" style="padding:6px 8px;display:none">${projectRows}</div>
       </div>`;
   }).join('');
 }
@@ -810,7 +861,29 @@ function doEditNote() {
   closeModal('modal-note'); render();
 }
 
+// GASへJSONPで送信（レスポンスのstatusを受け取れる）
+function gasJsonp(params, onDone) {
+  if (!GAS_API_URL || GAS_API_URL === 'ここにGASのURLを貼り付け') { if(onDone) onDone({status:'error',message:'API未設定'}); return; }
+  const cbName = 'cb_' + Date.now() + '_' + Math.floor(Math.random()*1000);
+  params.callback = cbName;
+  window[cbName] = function(json){
+    delete window[cbName];
+    const el = document.getElementById('jsonp_' + cbName); if (el) el.remove();
+    if (onDone) onDone(json||{});
+  };
+  const script = document.createElement('script');
+  script.id = 'jsonp_' + cbName;
+  script.src = GAS_API_URL + '?' + new URLSearchParams(params).toString();
+  script.onerror = function(){ if(window[cbName]) window[cbName]({status:'error',message:'通信エラー'}); };
+  document.body.appendChild(script);
+}
+
+let addEditRow = null;      // 編集対象の在庫マスター行番号（nullなら新規追加）
+let addEditOrigModel = '';  // 誤更新防止用の元型番
 function openAddModal() {
+  addEditRow = null; addEditOrigModel = '';
+  const h3=document.querySelector('#modal-add h3'); if(h3) h3.innerHTML='<i class="ti ti-plus"></i> 機材追加';
+  const sb=document.querySelector('#modal-add .btn-primary'); if(sb) sb.innerHTML='追加';
   const cats=[...new Set(inv.map(i=>i.cat))].sort();
   const catSel=document.getElementById('add-cat-sel');
   catSel.innerHTML='<option value="">— 新規入力 —</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
@@ -822,6 +895,21 @@ function openAddModal() {
   catSel.value=''; makerSel.value='';
   openModal('modal-add');
 }
+// 在庫一覧から既存機材を編集（追加モーダルを流用）
+function openEditItem(idx) {
+  const item = inv[idx];
+  if (!item) return;
+  openAddModal();
+  addEditRow = item.row || null;
+  addEditOrigModel = item.model || '';
+  const h3=document.querySelector('#modal-add h3'); if(h3) h3.innerHTML='<i class="ti ti-edit"></i> 機材を編集';
+  const sb=document.querySelector('#modal-add .btn-primary'); if(sb) sb.innerHTML='保存';
+  document.getElementById('add-cat').value = item.cat||'';
+  document.getElementById('add-maker').value = item.maker && item.maker!=='—' ? item.maker : '';
+  document.getElementById('add-model').value = item.model||'';
+  document.getElementById('add-qty').value = item.total||0;
+  document.getElementById('add-note').value = item.note||'';
+}
 function syncCombo(selId, inputId) {
   const val=document.getElementById(selId).value;
   if(val) document.getElementById(inputId).value=val;
@@ -830,26 +918,56 @@ function doAdd() {
   const cat=document.getElementById('add-cat').value.trim();
   const maker=document.getElementById('add-maker').value.trim();
   const model=document.getElementById('add-model').value.trim();
-  const qty=parseInt(document.getElementById('add-qty').value)||0;
+  const total=parseInt(document.getElementById('add-qty').value);
   const note=document.getElementById('add-note').value.trim();
-  if(!model||qty<1){alert('型番と数量は必須です');return;}
+  if(!model||isNaN(total)||total<0){alert('型番と総在庫数（0以上）は必須です');return;}
 
-  // 同じ型番が既にあれば在庫数を増やす
-  const existing = inv.find(i => i.model === model);
-  if (existing) {
-    if (!confirm(`「${model}」は既に登録済みです。\n在庫数を${existing.total}→${existing.total+qty}に増やしますか？`)) return;
-    existing.total += qty;
-    existing.status = existing.out >= existing.total ? 'OUT' : existing.out > 0 ? 'PARTIAL' : 'IN';
+  // ===== 編集モード：既存行を更新してスプレッドシートに保存 =====
+  if (addEditRow) {
+    const data = { row: addEditRow, cat: cat||'その他', maker: maker||'—', model, note, total, origModel: addEditOrigModel };
+    const item = inv.find(i => i.row === addEditRow);
+    if (item) { item.cat=cat||'その他'; item.maker=maker||'—'; item.model=model; item.note=note; item.total=total; item.stock=Math.max(0,total-(item.out||0)); }
     closeModal('modal-add'); render();
+    gasJsonp({ action:'edit_inventory_item', data: JSON.stringify(data) }, json => {
+      if (json.status==='error') { alert('⚠️ 保存できませんでした: ' + (json.message||'')); }
+      setTimeout(()=>{ try{ reloadData(); }catch(_){} }, 1200);
+    });
     return;
   }
 
-  inv.push({cat:cat||'その他',maker:maker||'—',model,total:qty,out:0,special:0,status:'IN',note});
+  // ===== 追加モード：同じ型番があれば総数を増やす（既存行の編集）=====
+  const existing = inv.find(i => i.model === model);
+  if (existing) {
+    const newTotal = (existing.total||0) + total;
+    if (!confirm(`「${model}」は既に登録済みです。\n在庫数を${existing.total}→${newTotal}に増やしますか？`)) return;
+    const data = { row: existing.row, cat: existing.cat, maker: existing.maker, model, note: existing.note||'', total: newTotal, origModel: model };
+    existing.total = newTotal; existing.stock = Math.max(0, newTotal-(existing.out||0));
+    closeModal('modal-add'); render();
+    gasJsonp({ action:'edit_inventory_item', data: JSON.stringify(data) }, json => {
+      if (json.status==='error') alert('⚠️ 保存できませんでした: ' + (json.message||''));
+      setTimeout(()=>{ try{ reloadData(); }catch(_){} }, 1200);
+    });
+    return;
+  }
+
+  // ===== 追加モード：新規行を作成 =====
+  inv.push({row:null,cat:cat||'その他',maker:maker||'—',model,total,stock:total,out:0,special:0,status:'IN',note});
   closeModal('modal-add'); render();
+  gasJsonp({ action:'add_inventory_item', data: JSON.stringify({cat:cat||'その他',maker:maker||'—',model,note,total}) }, json => {
+    if (json.status==='error') alert('⚠️ 追加できませんでした: ' + (json.message||''));
+    setTimeout(()=>{ try{ reloadData(); }catch(_){} }, 1200);  // 実際の行番号を取り込む
+  });
 }
 function deleteItem(idx) {
-  if(!confirm(`「${inv[idx].model}」を削除しますか？`))return;
+  const item = inv[idx];
+  if(!item) return;
+  if(!confirm(`「${item.model}」を在庫マスターから削除しますか？\n（この操作はスプレッドシートに保存されます）`))return;
+  const row = item.row, origModel = item.model;
   inv.splice(idx,1); render();
+  gasJsonp({ action:'delete_inventory_item', data: JSON.stringify({row, origModel}) }, json => {
+    if (json.status==='error') alert('⚠️ 削除できませんでした: ' + (json.message||''));
+    setTimeout(()=>{ try{ reloadData(); }catch(_){} }, 1200);
+  });
 }
 
 
@@ -867,10 +985,19 @@ function showProjectDetail(project, dateKey, ev) {
   if (ev) ev.stopPropagation();
   if (dateKey && typeof dateKey === 'object') { ev = dateKey; dateKey = ''; } // 旧呼び出し互換
   const matchKey = p => (p || '（案件名未入力）') === project;
-  const matchDate = o => !dateKey || dateKeyOf(o.dateOut || o.date) === dateKey;
-  const projectItems = outItems.filter(o => matchKey(o.project) && matchDate(o));
+  // クリックした日(dateKey)が「搬入〜返却」の期間内に入るレコードを一致とみなす。
+  // マルチデイ案件で搬入日以外の日を選んでも同じ案件の機材が出るようにし、
+  // 履歴フォールバック（処理時刻や履歴明細が誤表示される原因）を防ぐ。
+  const inSpan = (dOut, dRet) => {
+    if (!dateKey) return true;
+    const kOut = dateKeyOf(dOut);
+    if (!kOut) return false;
+    const kRet = dateKeyOf(dRet) || kOut;
+    return kOut <= dateKey && dateKey <= kRet;
+  };
+  const projectItems = outItems.filter(o => matchKey(o.project) && inSpan(o.dateOut || o.date, o.returnDate || o.dateReturn));
   // 予約中の機材（itemName→model, dateReturn→returnDate に正規化）
-  const resItems = (reservations || []).filter(r => matchKey(r.project) && (!dateKey || dateKeyOf(r.dateOut) === dateKey)).map(r => ({
+  const resItems = (reservations || []).filter(r => matchKey(r.project) && inSpan(r.dateOut, r.dateReturn)).map(r => ({
     model: r.itemName, qty: r.qty, category: r.category, note: r.note,
     dateOut: r.dateOut, returnDate: r.dateReturn, staff: r.staff, vehicle: r.vehicle, date: r.dateOut
   }));
@@ -883,7 +1010,8 @@ function showProjectDetail(project, dateKey, ev) {
   const staff   = items[0].staff || '—';
   const vehicle = items[0].vehicle || '';
   pdProject = project;
-  pdDateKey = dateKey || dateKeyOf(items[0].dateOut || items[0].date);
+  // 編集/DLは搬入日を正とする（クリックした日が搬入日以外でも案件を正しく特定）
+  pdDateKey = dateKeyOf(items[0].dateOut || items[0].date) || dateKey;
   // タイトルに搬入日を付けて同名現場を区別
   const _d = parseDate(items[0].dateOut || items[0].date);
   const _md = _d ? `（${_d.getMonth()+1}/${_d.getDate()}）` : '';
@@ -924,6 +1052,301 @@ function showProjectDetail(project, dateKey, ev) {
 
 function openModal(id)  { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// ==================== 案件編集モーダル ====================
+let epItemsState = [];
+let epCreateMode = false;
+// ヘッダー「エクセル投入」：記入済みの荷出しエクセルをアプリからアップロード＝Dropbox投入と同じ処理
+function triggerIngestUpload() {
+  const inp = document.getElementById('ingest-file-input');
+  if (inp) { inp.value = ''; inp.click(); }
+}
+function ingestUploadFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (!/\.(xlsx|xls)$/i.test(file.name)) { alert('xlsx / xls ファイルを選んでください'); return; }
+  if (!confirm(`「${file.name}」を投入します。\n記入済みの荷出しエクセルとして処理され、予約/持ち出し登録・荷出しリスト作成・通知まで自動で行われます。よろしいですか？`)) return;
+  const btn = document.getElementById('ingest-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> 投入中...'; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    // dataURL の "base64," 以降を取り出す
+    const b64 = String(reader.result).split(',')[1] || '';
+    const payload = { filename: file.name, contentB64: b64 };
+    const body = JSON.stringify({ action: 'ingest_upload', data: JSON.stringify(payload) });
+    console.log('[ingest_upload] POST body size:', body.length, 'file:', file.name);
+    fetch(GAS_API_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: body
+    }).catch(err => console.warn('[ingest_upload]送信警告:', err));
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-file-upload"></i> エクセル投入'; }
+    alert('投入しました。30〜60秒ほどで処理が完了し、LINE/Slackに結果が通知されます。画面は自動で更新されます。\n※在庫不足やエラーの場合も通知で分かります。');
+    setTimeout(() => { try { reloadData(); } catch(_){} }, 40000);
+    setTimeout(() => { try { reloadData(); } catch(_){} }, 75000);
+  };
+  reader.onerror = () => { alert('ファイルの読み込みに失敗しました'); if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-file-upload"></i> エクセル投入'; } };
+  reader.readAsDataURL(file);
+}
+// ヘッダー「…」その他メニュー
+function toggleMoreMenu(e) {
+  if (e) e.stopPropagation();
+  const m = document.getElementById('more-menu');
+  if (!m) return;
+  m.style.display = (m.style.display === 'none' || !m.style.display) ? 'block' : 'none';
+}
+function closeMoreMenu() {
+  const m = document.getElementById('more-menu');
+  if (m) m.style.display = 'none';
+}
+// メニュー外クリックで閉じる
+document.addEventListener('click', (e) => {
+  const m = document.getElementById('more-menu');
+  const b = document.getElementById('more-btn');
+  if (m && m.style.display === 'block' && !m.contains(e.target) && b && !b.contains(e.target)) m.style.display = 'none';
+});
+// 現在の荷だし表テンプレをアプリからダウンロード
+function downloadTemplate() {
+  const btn = document.getElementById('template-dl-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> 取得中...'; }
+  const restore = () => { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-file-download"></i> 荷だし表DL'; } };
+  const cbName = 'tplDl_' + Date.now();
+  window[cbName] = function(json) {
+    delete window[cbName];
+    const el = document.getElementById('jsonp_' + cbName); if (el) el.remove();
+    restore();
+    if (!json || json.status !== 'ok') { alert('取得失敗: ' + ((json && json.message) || 'エラー')); return; }
+    const bytes = Uint8Array.from(atob(json.data), c => c.charCodeAt(0));
+    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = json.filename || '荷だし表.xlsx';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  const script = document.createElement('script');
+  script.id = 'jsonp_' + cbName;
+  script.src = GAS_API_URL + '?action=template_download&callback=' + cbName;
+  script.onerror = function() { delete window[cbName]; script.remove(); restore(); alert('取得に失敗しました'); };
+  document.body.appendChild(script);
+}
+// 荷だし表テンプレを更新（アップロード→テンプレ差し替え＋直下アーカイブ＋Slack通知）
+function triggerTemplateUpload() {
+  const inp = document.getElementById('template-file-input');
+  if (inp) { inp.value = ''; inp.click(); }
+}
+function templateUploadFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (!/\.(xlsx|xls)$/i.test(file.name)) { alert('xlsx / xls ファイルを選んでください'); return; }
+  if (!confirm(`「${file.name}」で荷だし表テンプレを更新します。\n荷出しリスト生成に使うテンプレが差し替わり、Slack/LINEに更新通知が届きます。よろしいですか？`)) return;
+  const btn = document.getElementById('template-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> 更新中...'; }
+  const restore = () => { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-file-spreadsheet"></i> 荷だし表更新'; } };
+  const reader = new FileReader();
+  reader.onload = () => {
+    // テンプレのbase64は大きいので POST(no-cors)。レスポンスはopaqueだが完了はSlack/LINE通知で分かる
+    const b64 = String(reader.result).split(',')[1] || '';
+    const body = JSON.stringify({ action: 'update_template', data: JSON.stringify({ filename: file.name, contentB64: b64 }) });
+    fetch(GAS_API_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: body
+    }).catch(err => console.warn('[update_template]送信警告:', err));
+    restore();
+    alert('荷だし表を更新しました。数秒後にSlack/LINEへ更新通知が届きます。');
+  };
+  reader.onerror = () => { alert('ファイルの読み込みに失敗しました'); restore(); };
+  reader.readAsDataURL(file);
+}
+// 担当者・車両の入力候補を既存データから生成
+function populateEpCandidates() {
+  const src = [].concat(outItems||[], reservations||[], history||[]);
+  const staffs = [...new Set(src.map(x => x.staff).filter(s => s && s !== '未入力'))];
+  const vehicles = [...new Set(src.map(x => x.vehicle).filter(Boolean))];
+  const sEl = document.getElementById('ep-staff-datalist');
+  const vEl = document.getElementById('ep-vehicle-datalist');
+  if (sEl) sEl.innerHTML = staffs.map(s => `<option value="${escHtml(s)}"></option>`).join('');
+  if (vEl) vEl.innerHTML = vehicles.map(v => `<option value="${escHtml(v)}"></option>`).join('');
+}
+// ヘッダー「＋新規案件」：編集モーダルを空の作成モードで開く（UI/オートコンプリートを流用）
+function openCreateProject() {
+  epCreateMode = true;
+  pdProject = '';
+  pdDateKey = '';
+  epItemsState = [];
+  document.getElementById('ep-title').textContent = '（新規）';
+  const h3 = document.querySelector('#modal-edit-project h3');
+  if (h3) h3.innerHTML = '<i class="ti ti-plus" aria-hidden="true"></i> 案件を新規作成 <span id="ep-title" style="color:var(--text2);font-size:13px;margin-left:8px">（新規）</span>';
+  ['ep-project','ep-staff','ep-vehicle','ep-dateout','ep-dateret'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  populateEpCandidates();
+  renderEpItems();
+  openModal('modal-edit-project');
+}
+function openEditProject() {
+  if (!pdProject) return;
+  epCreateMode = false;
+  populateEpCandidates();
+  const h3 = document.querySelector('#modal-edit-project h3');
+  if (h3) h3.innerHTML = '<i class="ti ti-edit" aria-hidden="true"></i> 案件を編集 <span id="ep-title" style="color:var(--text2);font-size:13px;margin-left:8px"></span>';
+  const projectItems = outItems.filter(o => (o.project||'（案件名未入力）') === pdProject && (!pdDateKey || dateKeyOf(o.dateOut||o.date) === pdDateKey));
+  const resItems = (reservations||[]).filter(r => r.project === pdProject && (!pdDateKey || dateKeyOf(r.dateOut) === pdDateKey));
+  const rows = projectItems.length ? projectItems.map(o => ({
+    kind: o.note === '[レンタル]' ? 'rental' : (o.note === '(在庫管理外)' ? 'free' : 'own'),
+    category: o.category||'', maker: o.maker||'', itemName: o.model||'', qty: o.qty||0, note: o.note||''
+  })) : resItems.map(r => ({
+    kind: r.note === '[レンタル]' ? 'rental' : (r.note === '(在庫管理外)' ? 'free' : 'own'),
+    category: r.category||'', maker: r.maker||'', itemName: r.itemName||'', qty: r.qty||0, note: r.note||''
+  }));
+  // 人員のみプレースホルダは編集画面から除外
+  epItemsState = rows.filter(r => !(r.category === '人員のみ' && r.itemName === '人員のみ'));
+  const src = projectItems[0] || resItems[0] || {};
+  document.getElementById('ep-title').textContent = '';
+  document.getElementById('ep-project').value = pdProject;
+  document.getElementById('ep-staff').value = src.staff || '';
+  document.getElementById('ep-vehicle').value = src.vehicle || '';
+  document.getElementById('ep-dateout').value = src.dateOut || src.date || '';
+  document.getElementById('ep-dateret').value = src.dateReturn || src.returnDate || '';
+  renderEpItems();
+  openModal('modal-edit-project');
+}
+function renderEpItems() {
+  const kindLabel = { own:'自社', rental:'レンタル', free:'フリー' };
+  const invList = inv || [];
+  // メーカー候補（在庫マスターの会社/メーカー一覧・重複除去）
+  const makers = [...new Set(invList.map(x => x.maker).filter(Boolean))];
+  const makerDatalist = `<datalist id="ep-maker-datalist">${makers.map(m => `<option value="${escHtml(m)}"></option>`).join('')}</datalist>`;
+  // 全型番候補
+  const allModels = [...new Set(invList.map(x => x.model).filter(Boolean))];
+  const html = epItemsState.map((it, i) => {
+    const showMaker = it.kind !== 'free';
+    // 自社行：メーカーが入っていればそのメーカーの型番に絞った候補、無ければ全型番
+    let rowModels = allModels;
+    if (it.kind === 'own' && it.maker && it.maker.trim()) {
+      const mk = it.maker.trim();
+      const filtered = [...new Set(invList.filter(x => String(x.maker) === mk).map(x => x.model).filter(Boolean))];
+      if (filtered.length) rowModels = filtered;
+    }
+    const modelListId = `ep-model-dl-${i}`;
+    const modelDatalist = it.kind === 'own'
+      ? `<datalist id="${modelListId}">${rowModels.map(m => `<option value="${escHtml(m)}"></option>`).join('')}</datalist>` : '';
+    const nameListAttr  = it.kind === 'own' ? `list="${modelListId}"` : '';
+    const makerListAttr = (showMaker && it.kind === 'own') ? 'list="ep-maker-datalist"' : '';
+    return `<div class="ep-item-row" data-i="${i}">
+      ${modelDatalist}
+      <span class="ep-badge ep-${it.kind}">${kindLabel[it.kind]||it.kind}</span>
+      ${showMaker ? `<input class="ep-in-maker" ${makerListAttr} placeholder="会社/メーカー" value="${escHtml(it.maker||'')}" oninput="epItemsState[${i}].maker=this.value" onchange="epOnMakerChange(${i},this.value)">` : ''}
+      <input class="ep-in-name" ${nameListAttr} placeholder="型番/機材名" value="${escHtml(it.itemName||'')}" oninput="epItemsState[${i}].itemName=this.value" onchange="epOnNameChange(${i},this.value)">
+      <input class="ep-in-qty" type="number" min="0" value="${it.qty}" oninput="epItemsState[${i}].qty=parseInt(this.value)||0">
+      <button class="btn ep-del" onclick="epDeleteItem(${i})"><i class="ti ti-trash"></i></button>
+    </div>`;
+  }).join('');
+  document.getElementById('ep-items').innerHTML = makerDatalist + (html || '<div style="color:var(--text2);font-size:12px;padding:8px 0">（機材なし＝人員のみ現場として登録されます）</div>');
+}
+// メーカーを入れ/選んだら、その行の型番候補をそのメーカーの機材に絞り直す
+function epOnMakerChange(i, val) {
+  const it = epItemsState[i];
+  if (!it) return;
+  it.maker = val;
+  if (it.kind === 'own') renderEpItems();
+}
+// 候補から型番を選んだら、自社機材はメーカーを在庫マスターから自動補完
+function epOnNameChange(i, val) {
+  const it = epItemsState[i];
+  if (!it) return;
+  it.itemName = val;
+  if (it.kind === 'own' && (!it.maker || it.maker.trim() === '')) {
+    const hit = (inv || []).find(x => String(x.model) === String(val));
+    if (hit && hit.maker) { it.maker = hit.maker; renderEpItems(); }
+  }
+}
+function epAddItem(kind) {
+  epItemsState.push({ kind, category:'', maker:'', itemName:'', qty:1, note:'' });
+  renderEpItems();
+}
+function epDeleteItem(i) {
+  epItemsState.splice(i, 1);
+  renderEpItems();
+}
+function saveEditProject() {
+  const btn = document.getElementById('ep-save-btn');
+  const meta = {
+    project:    document.getElementById('ep-project').value.trim(),
+    staff:      document.getElementById('ep-staff').value.trim(),
+    vehicle:    document.getElementById('ep-vehicle').value.trim(),
+    dateOut:    document.getElementById('ep-dateout').value.trim(),
+    dateReturn: document.getElementById('ep-dateret').value.trim(),
+  };
+  const items = epItemsState.filter(it => it.itemName && it.itemName.trim() !== '' && ((it.qty|0) > 0 || it.kind === 'rental' || it.kind === 'free'));
+  if (!meta.project) { alert('案件名は必須です'); return; }
+  const action = epCreateMode ? 'create_project' : 'edit_project';
+  const payload = epCreateMode
+    ? { meta, items }
+    : { origProject: pdProject, origDateKey: pdDateKey || '', meta, items };
+  const confirmMsg = epCreateMode
+    ? 'この内容で新規案件を登録します。搬入日が未来なら予約、当日以降なら持ち出しとして登録され、荷出しリストも作成されます。よろしいですか？'
+    : 'この内容で反映します。マスターの残在庫も差分だけ調整されます。よろしいですか？';
+  if (!confirm(confirmMsg)) return;
+  const body = JSON.stringify({ action, data: JSON.stringify(payload) });
+  console.log('[' + action + '] POST body size:', body.length, 'items:', items.length);
+  // 送信（no-cors・レスポンスは opaque だが GAS 側は処理される）。完了は LINE/Slack 通知で分かる
+  fetch(GAS_API_URL, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: body
+  }).catch(err => console.warn('[edit_project]送信警告:', err));
+  // モーダルは即閉じてユーザーを待たせない。反映はバックグラウンドで進み、自動更新で取り込む
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> 保存'; }
+  closeModal('modal-edit-project');
+  closeModal('modal-project-detail');
+  alert('反映を開始しました。20〜40秒ほどで完了し、LINE/Slackに通知が届きます。画面は自動で更新されます。');
+  // 反映結果を取り込むため段階的に自動リロード（機材が多い案件は時間がかかるため2回）
+  setTimeout(() => { try { reloadData(); } catch(_){} }, 30000);
+  setTimeout(() => { try { reloadData(); } catch(_){} }, 60000);
+}
+
+// エラーフォルダ一覧を取得して表示
+function openErrorList() {
+  openModal('modal-error');
+  const body = document.getElementById('error-list-body');
+  body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text2)">読み込み中...</div>';
+  const cb = 'cbErrList' + Date.now();
+  window[cb] = (json) => {
+    delete window[cb]; s.remove();
+    if (json.status !== 'ok') { body.innerHTML = '<div class="empty">取得に失敗しました：' + escHtml(json.message||'') + '</div>'; return; }
+    if (!json.files.length) { body.innerHTML = '<div class="empty">エラーフォルダにファイルはありません</div>'; return; }
+    body.innerHTML = json.files.map(f => `
+      <div style="display:flex;align-items:center;gap:10px;padding:10px;border-bottom:1px solid var(--border)">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(f.name)}</div>
+          <div style="font-size:11px;color:var(--text2)">${escHtml(f.modified.slice(0,10))}</div>
+        </div>
+        <button class="btn btn-primary" style="padding:6px 12px;font-size:12px" onclick="reingestError('${f.name.replace(/'/g,"\\'")}',this)"><i class="ti ti-rotate"></i> 再投入</button>
+      </div>`).join('');
+  };
+  const s = document.createElement('script');
+  s.src = GAS_API_URL + '?action=error_list&callback=' + cb;
+  document.body.appendChild(s);
+}
+
+function reingestError(name, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '処理中...'; }
+  const cb = 'cbReingest' + Date.now();
+  window[cb] = (json) => {
+    delete window[cb]; s.remove();
+    if (json.status === 'ok') {
+      if (btn) { btn.textContent = '✓ 完了'; btn.classList.remove('btn-primary'); }
+      setTimeout(openErrorList, 800);
+    } else {
+      alert('再投入に失敗：' + (json.message||''));
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-rotate"></i> 再投入'; }
+    }
+  };
+  const s = document.createElement('script');
+  s.src = GAS_API_URL + '?action=error_reingest&name=' + encodeURIComponent(name) + '&callback=' + cb;
+  document.body.appendChild(s);
+}
 document.querySelectorAll('.modal-backdrop').forEach(b => {
   b.addEventListener('click', e => { if(e.target===b) b.classList.remove('open'); });
 });
@@ -1044,6 +1467,7 @@ function applyData(json) {
       const isSpecial = ['修理中','レンタル中','長期不在'].includes(status);
       const special = isSpecial ? Math.max(0, total - stock - out) : 0;
       return {
+        row:     r.row || null,
         cat:     String(r.cat   || ''),
         maker:   String(r.maker || ''),
         model:   String(r.model || ''),
@@ -1182,7 +1606,82 @@ function renderConflictBanner() {
   if (!el) return;
   if (!conflicts || !conflicts.length) { el.innerHTML = ''; return; }
   const items = conflicts.map(c => `${escHtml(c.model)}（${c.shortage}不足）`).join('、');
-  el.innerHTML = `<div class="conflict-alert" onclick="switchTab('dashboard',document.querySelector('.tab:last-child'))"><i class="ti ti-alert-triangle"></i> <strong>予約重複で在庫超過：</strong>${items}<span style="opacity:.75"> — タップで詳細</span></div>`;
+  el.innerHTML = `<div class="conflict-alert" onclick="openConflictModal()"><i class="ti ti-alert-triangle"></i> <strong>予約重複で在庫超過：</strong>${items}<span style="opacity:.75"> — タップで詳細</span></div>`;
+}
+
+// 在庫超過（予約重複）の詳細をモーダルで表示（旧ダッシュボードの代替）
+function openConflictModal() {
+  const body = document.getElementById('conflict-detail-body');
+  if (!body) return;
+  if (!conflicts || !conflicts.length) {
+    body.innerHTML = '<div style="color:var(--text2);padding:8px 0">現在、在庫超過はありません。</div>';
+  } else {
+    body.innerHTML = conflicts.map(c => `
+      <div style="padding:10px 2px;border-bottom:0.5px solid var(--border)">
+        <div style="font-weight:700;font-size:14px">${escHtml(c.model)} <span style="color:var(--danger-text)">必要${c.peak} / 総数${c.total}（${c.shortage}個不足）</span></div>
+        ${(c.bookings||[]).map(b => `<div style="font-size:12px;color:var(--text2);margin-top:3px">・${escHtml(b.project||'（未入力）')} ×${b.qty}　${escHtml(fmtDateDisp(b.dateOut))} 〜 ${escHtml(fmtDateDisp(b.dateReturn))}</div>`).join('')}
+      </div>`).join('');
+  }
+  openModal('modal-conflict');
+}
+
+// カレンダーの「+N件」タップ：その日の予定を一覧表示。項目タップで個別詳細へ
+function openCalDayModal(dateKey, e) {
+  if (e) e.stopPropagation();
+  const y = parseInt(dateKey.slice(0,4)), m = parseInt(dateKey.slice(4,6))-1, d = parseInt(dateKey.slice(6,8));
+  const day = new Date(y, m, d); day.setHours(0,0,0,0);
+  const nextDay = new Date(y, m, d+1); nextDay.setHours(0,0,0,0);
+  const parse = (v) => { const dd = parseDate(v); return dd ? dd : null; };
+  const inSpan = (src) => {
+    const s = parse(src.dateOut || src.date); if (!s) return false;
+    const e2 = parse(src.dateReturn || src.returnDate) || s;
+    const sd = new Date(s.getFullYear(), s.getMonth(), s.getDate());
+    const ed = new Date(e2.getFullYear(), e2.getMonth(), e2.getDate());
+    return sd <= day && day <= ed;
+  };
+  // 案件単位で集約（機材が複数行あっても1件）
+  const byKey = new Map();
+  const push = (src, kind) => {
+    if (!inSpan(src)) return;
+    const proj = (src.project || '（案件名未入力）');
+    const dOutRaw = src.dateOut || src.date || '';
+    const dOutKey = dateKeyOf(dOutRaw) || '';
+    const key = proj + '|' + dOutKey;
+    if (byKey.has(key)) return;
+    byKey.set(key, {
+      project: proj,
+      dateOut: dOutRaw, dateReturn: src.dateReturn || src.returnDate || '',
+      dateOutKey: dOutKey, staff: src.staff || '', vehicle: src.vehicle || '', kind,
+    });
+  };
+  (outItems || []).forEach(o => push(o, 'out'));
+  (reservations || []).forEach(r => push(r, 'res'));
+  const items = [...byKey.values()].sort((a,b) => {
+    const ka = a.dateOutKey || '', kb = b.dateOutKey || '';
+    return ka.localeCompare(kb);
+  });
+  document.getElementById('cal-day-title').textContent = `${y}年${m+1}月${d}日 の予定（${items.length}件）`;
+  const body = document.getElementById('cal-day-body');
+  if (!items.length) {
+    body.innerHTML = '<div style="color:var(--text2);padding:12px 0">この日に予定はありません。</div>';
+  } else {
+    body.innerHTML = items.map(it => {
+      const kindBadge = it.kind === 'out'
+        ? '<span class="badge s-danger" style="font-size:10px">持ち出し中</span>'
+        : '<span class="badge s-info" style="font-size:10px">予約</span>';
+      const vc = vehicleClass(it.vehicle);
+      const vs = vehicleChipStyle(it.vehicle);
+      const veh = it.vehicle ? `<span class="cal-event ${vc}" style="font-size:10px;padding:1px 6px;height:auto;line-height:1.2;${vs}">${escHtml(it.vehicle)}</span>` : '';
+      const dateRange = `${escHtml(fmtDateDisp(it.dateOut))} 〜 ${escHtml(fmtDateDisp(it.dateReturn))}`;
+      return `
+        <div style="padding:10px 4px;border-bottom:0.5px solid var(--border);cursor:pointer" onclick="closeModal('modal-cal-day');showProjectDetail('${it.project.replace(/'/g,"\\'")}','${it.dateOutKey}')">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">${kindBadge}${veh}</div>
+          <div style="font-weight:700;font-size:14px">${escHtml(it.project)}</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:2px">${dateRange}${it.staff ? ' ・ 担当: ' + escHtml(it.staff) : ''}</div>
+        </div>`;
+    }).join('');
+  }
+  openModal('modal-cal-day');
 }
 
 function renderDashboard() {
@@ -1199,49 +1698,47 @@ function renderDashboard() {
 
   // 案件を日付マップに（持ち出し中＋履歴）
   const dateMap = {};
-  const addToMap = (dateStr, label, isRet) => {
-    try {
-      const d = new Date(dateStr);
-      if (isNaN(d)) return;
-      const key = d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
-      if (!dateMap[key]) dateMap[key] = [];
-      const entry = isRet ? '返却: ' + label : label;
-      if (!dateMap[key].includes(entry)) dateMap[key].push(entry);
-    } catch(e) {}
+  const pushEntry = (key, proj, vehicle, category, span, sortKey) => {
+    if (!dateMap[key]) dateMap[key] = [];
+    let existing = dateMap[key].find(e => e.proj === proj);
+    if (!existing) {
+      existing = { proj, vehicle: vehicle || '', cats: new Set(), span: span || 'single', sortKey: sortKey || 0 };
+      dateMap[key].push(existing);
+    } else if (span) {
+      existing.span = span;
+    }
+    if (category) existing.cats.add(category);
+  };
+  // 期間を日ごとに分割して pushEntry する（開始日=start, 終了日=end, 中間=mid）
+  const spanDays = (dOut, dRet, proj, vehicle, category) => {
+    const start = new Date(dOut.getFullYear(), dOut.getMonth(), dOut.getDate());
+    const end = dRet ? new Date(dRet.getFullYear(), dRet.getMonth(), dRet.getDate()) : start;
+    if (end < start) return spanDays(dOut, null, proj, vehicle, category);
+    const sortKey = start.getTime();  // 開始日でソートすると帯が同じ高さで並ぶ
+    let first = true;
+    for (let cur = new Date(start); cur <= end; cur.setDate(cur.getDate()+1)) {
+      const isLast = (cur.getTime() === end.getTime());
+      const span = (first && isLast) ? 'single' : (first ? 'start' : (isLast ? 'end' : 'mid'));
+      const key = cur.getFullYear() + '-' + (cur.getMonth()+1) + '-' + cur.getDate();
+      pushEntry(key, proj, vehicle, category, span, sortKey);
+      first = false;
+    }
   };
   history.forEach(h => {
     if (!h.project) return;
-    addToMap(h.date, h.project, false);
+    const d = parseDate(h.date);
+    if (!d) return;
+    const key = d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
+    pushEntry(key, h.project, h.vehicle || '', h.category || '', 'single', d.getTime());
   });
   outItems.forEach(o => {
-    if (!o.dateOut && !o.date) return;
-    try {
-      const d = new Date(o.date || o.dateOut);
-      if (!isNaN(d)) {
-        const key = d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
-        if (!dateMap[key]) dateMap[key] = [];
-        const proj = o.project || '（案件名未入力）';
-        // 同じ案件名は1回だけ追加
-        if (!dateMap[key].includes(proj)) {
-          dateMap[key].push(proj);
-        }
-      }
-    } catch(e) {}
-    // 返却予定日も表示
-    if (o.returnDate) {
-      try {
-        const rd = new Date(o.returnDate);
-        if (!isNaN(rd)) {
-          const rkey = rd.getFullYear() + '-' + (rd.getMonth()+1) + '-' + rd.getDate();
-          if (!dateMap[rkey]) dateMap[rkey] = [];
-          const retLabel = '返却: ' + (o.project || '未入力');
-          if (!dateMap[rkey].includes(retLabel)) {
-            dateMap[rkey].push(retLabel);
-          }
-        }
-      } catch(e) {}
-    }
+    const dOut = parseDate(o.dateOut || o.date);
+    if (!dOut) return;
+    const dRet = parseDate(o.returnDate || o.dateReturn) || dOut;
+    spanDays(dOut, dRet, o.project || '（案件名未入力）', o.vehicle || '', o.category || '');
   });
+  // 各日のイベントを開始日順にソート（複数日案件が上に来る／同じ高さで揃う）
+  Object.values(dateMap).forEach(arr => arr.sort((a, b) => (a.sortKey||0) - (b.sortKey||0)));
 
   // 在庫不足ランキング（shortageDataから）
   const top10 = Object.entries(shortageData)
@@ -1257,23 +1754,32 @@ function renderDashboard() {
   dayNames.forEach(d => {
     calCells += `<div class="cal-head">${d}</div>`;
   });
-  for (let i = 0; i < (firstDay === 0 ? 6 : firstDay-1); i++) {
+  // 日曜始まりカレンダー：firstDay(0=日..6=土)ぶんの空セルを詰める
+  for (let i = 0; i < firstDay; i++) {
     calCells += `<div class="cal-cell empty"></div>`;
   }
   for (let d = 1; d <= daysInMonth; d++) {
     const key = year + '-' + (month+1) + '-' + d;
     const events = dateMap[key] || [];
     const isToday = d === now.getDate() && month === now.getMonth() && year === now.getFullYear();
-    const eventDots = events.slice(0,5).map(function(e) {
-      const isRet = e.startsWith('返却');
-      const proj = isRet ? e.replace('返却: ','') : e;
-      const label = e.length > 8 ? e.slice(0,8)+'…' : e;
-      const _dk = isRet ? '' : (year + String(month+1).padStart(2,'0') + String(d).padStart(2,'0'));
-      return '<div class="cal-event' + (isRet?' ret':'') + '" data-project="' + proj.replace(/"/g,'&quot;') + '" data-datekey="' + _dk + '" onclick="showProjectDetail(this.dataset.project,this.dataset.datekey,event)" style="cursor:pointer">' + label + '</div>';
+    const maxShow = 3;
+    const eventDots = events.slice(0, maxShow).map(function(ev) {
+      const proj = ev.proj;
+      const isPersonOnly = ev.cats && ev.cats.size > 0 && [...ev.cats].every(c => c === '人員のみ');
+      const rawLabel = proj.length > 8 ? proj.slice(0,8)+'…' : proj;
+      // 複数日案件は先頭日と末尾日にラベル表示、中間だけ空白（帯感を保ちつつ視認性UP）
+      const showLabel = (ev.span !== 'mid');
+      const label = showLabel ? (isPersonOnly ? '👤 ' + rawLabel : rawLabel) : '';
+      const spanClass = ev.span ? 'cal-span-' + ev.span : '';
+      const _dk = year + String(month+1).padStart(2,'0') + String(d).padStart(2,'0');
+      const vc = vehicleClass(ev.vehicle);
+      const vs = vehicleChipStyle(ev.vehicle);
+      return '<div class="cal-event ' + vc + ' ' + spanClass + '" data-project="' + proj.replace(/"/g,'&quot;') + '" data-datekey="' + _dk + '" onclick="showProjectDetail(this.dataset.project,this.dataset.datekey,event)" style="cursor:pointer;' + vs + '">' + label + '</div>';
     }).join('');
+    const overflow = events.length > maxShow ? `<div class="cal-more">+${events.length - maxShow}</div>` : '';
     calCells += `<div class="cal-cell${isToday ? ' today' : ''}${events.length ? ' has-event' : ''}">
-      <span class="cal-day">${d}</span>
-      ${eventDots}
+      <span class="cal-day"><span class="cal-day-num">${d}</span></span>
+      ${eventDots}${overflow}
     </div>`;
   }
 
@@ -1320,13 +1826,6 @@ function renderDashboard() {
 
   container.innerHTML = conflictCard + `
     <div class="dash-card">
-      <div class="dash-card-head">
-        <i class="ti ti-chart-bar" aria-hidden="true"></i>
-        <span>在庫不足 TOP${top10.length}</span>
-      </div>
-      <div class="rep-list">${reportRows}</div>
-    </div>
-    <div class="dash-card" style="margin-top:14px">
       <div class="dash-card-head">
         <i class="ti ti-building-store" aria-hidden="true"></i>
         <span>レンタル品 TOP${rentTop.length}（購入検討の参考）</span>
@@ -1540,51 +2039,74 @@ function renderTopPage() {
   const daysInMonth = new Date(year, month+1, 0).getDate();
 
   const dateMap = {};
-  const addToMap = (dateStr, label, isRet) => {
-    const d = parseDate(dateStr);
-    if (!d) return;
-    const key = d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
+  const pushEntry = (key, proj, vehicle, category, span, sortKey) => {
     if (!dateMap[key]) dateMap[key] = [];
-    const entry = isRet ? '返却: ' + label : label;
-    if (!dateMap[key].includes(entry)) dateMap[key].push(entry);
+    let existing = dateMap[key].find(e => e.proj === proj);
+    if (!existing) {
+      existing = { proj, vehicle: vehicle || '', cats: new Set(), span: span || 'single', sortKey: sortKey || 0 };
+      dateMap[key].push(existing);
+    } else if (span) {
+      existing.span = span;
+    }
+    if (category) existing.cats.add(category);
+  };
+  const spanDays = (dOut, dRet, proj, vehicle, category) => {
+    const start = new Date(dOut.getFullYear(), dOut.getMonth(), dOut.getDate());
+    const end = dRet ? new Date(dRet.getFullYear(), dRet.getMonth(), dRet.getDate()) : start;
+    if (end < start) return spanDays(dOut, null, proj, vehicle, category);
+    const sortKey = start.getTime();
+    let first = true;
+    for (let cur = new Date(start); cur <= end; cur.setDate(cur.getDate()+1)) {
+      const isLast = (cur.getTime() === end.getTime());
+      const span = (first && isLast) ? 'single' : (first ? 'start' : (isLast ? 'end' : 'mid'));
+      const key = cur.getFullYear() + '-' + (cur.getMonth()+1) + '-' + cur.getDate();
+      pushEntry(key, proj, vehicle, category, span, sortKey);
+      first = false;
+    }
   };
   outItems.forEach(o => {
-    // 持ち出し日は搬入予定(dateOut)を優先（処理日時dateではなく）
-    const d = parseDate(o.dateOut || o.date);
-    if (d) {
-      const key = d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
-      if (!dateMap[key]) dateMap[key] = [];
-      const proj = o.project || '（案件名未入力）';
-      if (!dateMap[key].includes(proj)) dateMap[key].push(proj);
-    }
-    const rd = parseDate(o.returnDate);
-    if (rd) {
-      const rkey = rd.getFullYear() + '-' + (rd.getMonth()+1) + '-' + rd.getDate();
-      if (!dateMap[rkey]) dateMap[rkey] = [];
-      const retLabel = '返却: ' + (o.project || '未入力');
-      if (!dateMap[rkey].includes(retLabel)) dateMap[rkey].push(retLabel);
-    }
+    const dOut = parseDate(o.dateOut || o.date);
+    if (!dOut) return;
+    const dRet = parseDate(o.returnDate || o.dateReturn) || dOut;
+    spanDays(dOut, dRet, o.project || '（案件名未入力）', o.vehicle || '', o.category || '');
   });
-  // 予約も持ち出し日にマップ
-  (reservations || []).forEach(r => { if (r.project) addToMap(r.dateOut, r.project, false); });
+  (reservations || []).forEach(r => {
+    if (!r.project) return;
+    const dOut = parseDate(r.dateOut);
+    if (!dOut) return;
+    const dRet = parseDate(r.dateReturn) || dOut;
+    spanDays(dOut, dRet, r.project, r.vehicle || '', r.category || '');
+  });
+  Object.values(dateMap).forEach(arr => arr.sort((a, b) => (a.sortKey||0) - (b.sortKey||0)));
 
   const monthNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
   const dayNames = ['日','月','火','水','木','金','土'];
   let calCells = '';
   dayNames.forEach(d => { calCells += `<div class="cal-head">${d}</div>`; });
-  for (let i = 0; i < (firstDay === 0 ? 6 : firstDay-1); i++) calCells += `<div class="cal-cell empty"></div>`;
+  // 日曜始まりカレンダー：firstDay(0=日..6=土)ぶんの空セルを詰める
+  for (let i = 0; i < firstDay; i++) calCells += `<div class="cal-cell empty"></div>`;
+  const maxShow = 3;
   for (let d = 1; d <= daysInMonth; d++) {
     const key = year + '-' + (month+1) + '-' + d;
     const events = dateMap[key] || [];
+    const dowIdx = new Date(year, month, d).getDay();
     const isToday = d === now.getDate() && month === now.getMonth() && year === now.getFullYear();
-    const eventDots = events.slice(0,5).map(function(e) {
-      const isRet = e.startsWith('返却');
-      const proj = isRet ? e.replace('返却: ','') : e;
-      const label = e.length > 8 ? e.slice(0,8)+'…' : e;
-      const _dk = isRet ? '' : (year + String(month+1).padStart(2,'0') + String(d).padStart(2,'0'));
-      return '<div class="cal-event' + (isRet?' ret':'') + '" data-project="' + proj.replace(/"/g,'&quot;') + '" data-datekey="' + _dk + '" onclick="showProjectDetail(this.dataset.project,this.dataset.datekey,event)" style="cursor:pointer">' + label + '</div>';
+    const _dk = year + String(month+1).padStart(2,'0') + String(d).padStart(2,'0');
+    const eventDots = events.slice(0, maxShow).map(function(ev) {
+      const proj = ev.proj;
+      const isPersonOnly = ev.cats && ev.cats.size > 0 && [...ev.cats].every(c => c === '人員のみ');
+      const rawLabel = proj.length > 10 ? proj.slice(0,10)+'…' : proj;
+      const showLabel = (ev.span !== 'mid');
+      const label = showLabel ? (isPersonOnly ? '👤 ' + rawLabel : rawLabel) : '';
+      const spanClass = ev.span ? 'cal-span-' + ev.span : '';
+      const vc = vehicleClass(ev.vehicle);
+      const vs = vehicleChipStyle(ev.vehicle);
+      return '<div class="cal-event ' + vc + ' ' + spanClass + '" data-project="' + proj.replace(/"/g,'&quot;') + '" data-datekey="' + _dk + '" onclick="showProjectDetail(this.dataset.project,this.dataset.datekey,event)" style="cursor:pointer;' + vs + '" title="' + proj.replace(/"/g,'&quot;') + '">' + label + '</div>';
     }).join('');
-    calCells += `<div class="cal-cell${isToday?' today':''}${events.length?' has-event':''}"><span class="cal-day">${d}</span>${eventDots}</div>`;
+    const overflow = events.length > maxShow
+      ? `<div class="cal-more" onclick="openCalDayModal('${_dk}',event)">+${events.length - maxShow}件</div>` : '';
+    const dowCls = dowIdx === 0 ? ' sun' : (dowIdx === 6 ? ' sat' : '');
+    calCells += `<div class="cal-cell${isToday?' today':''}${events.length?' has-event':''}${dowCls}"><span class="cal-day"><span class="cal-day-num">${d}</span></span><div class="cal-events">${eventDots}${overflow}</div></div>`;
   }
 
   calContainer.innerHTML = `
@@ -1602,65 +2124,90 @@ function renderTopPage() {
       </div>
       <div class="cal-grid">${calCells}</div>
       <div class="cal-legend">
-        <span class="cal-event">持ち出し</span>
-        <span class="cal-event ret">返却予定</span>
+        <span class="cal-event veh-caravan">キャラバン</span>
+        <span class="cal-event veh-truck">トラック</span>
+        <span class="cal-event veh-rental">レンタカー</span>
+        <span class="cal-event veh-other">その他</span>
+        <span class="cal-event" style="background:linear-gradient(90deg,#dbeafe 0% 50%,#fef3c7 50% 100%);color:#1e40af">複数車両</span>
       </div>
     </div>
   `;
 
-  // 今後1週間の予約を右カラムに表示
+  // 本日から1週間の予定を右カラムに表示（本日時点でアクティブ or 開始が本日〜7日後の案件）
   const upcomingEl = document.getElementById('upcoming-content');
   if (upcomingEl) {
     const today = new Date(); today.setHours(0,0,0,0);
-    const week = new Date(today); week.setDate(week.getDate() + 7);
-    const dateLabel = d => {
-      const dd = new Date(d);
-      if (isNaN(dd)) return '';
-      // 時刻部分を切り捨てて純粋な日付差で計算（搬入時刻に左右されない）
-      const ddDay = new Date(dd.getFullYear(), dd.getMonth(), dd.getDate());
-      const diff = Math.round((ddDay - today) / 86400000);
-      const label = diff === 0 ? '今日' : diff === 1 ? '明日' : `${diff}日後`;
-      return `${dd.getMonth()+1}/${dd.getDate()}（${['日','月','火','水','木','金','土'][dd.getDay()]}）${label}`;
+    const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + 7);
+    const dayNames = ['日','月','火','水','木','金','土'];
+    const dayOnly = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const diffDays = (a, b) => Math.round((dayOnly(a) - dayOnly(b)) / 86400000);
+    const fmtMd = d => `${d.getMonth()+1}/${d.getDate()}`;
+    const fmtMdWd = d => `${d.getMonth()+1}/${d.getDate()}（${dayNames[d.getDay()]}）`;
+
+    // 案件ごとに集約
+    const projMap = {};
+    const addProj = (project, dateOut, dateReturn, staff, vehicle, type) => {
+      if (!project) return;
+      const dOut = parseDate(dateOut);
+      if (!dOut) return;
+      const dRet = parseDate(dateReturn) || dOut;
+      const startInRange = (dOut >= today && dOut <= weekEnd);
+      const activeNow    = (dOut < today && dRet >= today);
+      if (!startInRange && !activeNow) return;
+      const key = project + '|' + dateKeyOf(dateOut);
+      if (!projMap[key]) {
+        projMap[key] = { dOut, dRet, project, staff: staff || '', vehicle: vehicle || '', type, dateKey: dateKeyOf(dateOut) };
+      }
     };
+    (reservations || []).forEach(r => addProj(r.project, r.dateOut, r.dateReturn, r.staff, r.vehicle, 'reserve'));
+    (outItems || []).forEach(o => addProj(o.project, o.dateOut, o.returnDate || o.dateReturn, o.staff, o.vehicle, 'out'));
 
-    // reservations（予約）＋ outItems（持ち出し中）の返却予定を合算
-    const items = [];
-    (reservations || []).forEach(r => {
-      const d = parseDate(r.dateOut);
-      if (d && d >= today && d <= week) {
-        items.push({ date: d, project: r.project || '（未入力）', staff: r.staff || '', items: r.itemName || '', type: 'reserve', dateKey: dateKeyOf(r.dateOut) });
-      }
-    });
-    (outItems || []).forEach(o => {
-      const d = parseDate(o.returnDate || o.dateReturn || o.dateOut);
-      if (d && d >= today && d <= week) {
-        items.push({ date: d, project: o.project || '（未入力）', staff: o.staff || '', items: o.itemName || '', type: 'out', dateKey: dateKeyOf(o.dateOut) });
-      }
-    });
-    items.sort((a,b) => a.date - b.date);
-
-    // 案件ごとにまとめる
-    const grouped = {};
-    items.forEach(item => {
-      const key = item.project + '|' + item.date.toDateString();
-      if (!grouped[key]) grouped[key] = { ...item, itemList: [] };
-      if (item.items) grouped[key].itemList.push(item.items);
-    });
-
-    const rows = Object.values(grouped);
+    const rows = Object.values(projMap).sort((a,b) => a.dOut - b.dOut);
     if (rows.length === 0) {
-      upcomingEl.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text2);font-size:13px">今後1週間の予約はありません</div>';
+      upcomingEl.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text2);font-size:13px">本日から1週間の予定はありません</div>';
     } else {
-      upcomingEl.innerHTML = rows.map(r => `
-        <div style="padding:10px 12px;border-bottom:0.5px solid var(--border);display:flex;gap:10px;align-items:flex-start;cursor:pointer" data-project="${escHtml(r.project)}" data-datekey="${r.dateKey||''}" onclick="showProjectDetail(this.dataset.project,this.dataset.datekey,event)">
-          <div style="background:${r.type==='reserve'?'var(--info-bg)':'var(--warn-bg)'};color:${r.type==='reserve'?'var(--info-text)':'var(--warn-text)'};border-radius:6px;padding:4px 8px;font-size:10px;font-weight:700;white-space:nowrap;flex-shrink:0">${dateLabel(r.date)}</div>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:600;color:var(--text);text-decoration:underline;text-underline-offset:2px">${escHtml(r.project)}</div>
-            ${r.staff ? `<div style="font-size:11px;color:var(--text2);margin-top:2px">${escHtml(r.staff)}</div>` : ''}
-          </div>
-          <div style="color:var(--text2);font-size:16px;align-self:center"><i class="ti ti-chevron-right"></i></div>
-        </div>
-      `).join('');
+      upcomingEl.innerHTML = rows.map(r => {
+        const totalDays = diffDays(r.dRet, r.dOut) + 1;
+        const isMultiDay = totalDays > 1;
+        // 日付範囲
+        const dateRange = isMultiDay
+          ? `${fmtMdWd(r.dOut)}<span style="color:var(--text2);margin:0 4px">〜</span>${fmtMd(r.dRet)}（${dayNames[r.dRet.getDay()]}）`
+          : fmtMdWd(r.dOut);
+        // ステータスバッジ
+        const startDiff = diffDays(r.dOut, today);
+        let statusText, statusBg, statusColor;
+        if (startDiff < 0) {
+          // 進行中：何日目/何日中
+          const dayIdx = diffDays(today, r.dOut) + 1;
+          statusText = `進行中 ${dayIdx}/${totalDays}日目`;
+          statusBg = 'var(--warn-bg)'; statusColor = 'var(--warn-text)';
+        } else if (startDiff === 0) {
+          statusText = '今日'; statusBg = 'var(--primary)'; statusColor = '#fff';
+        } else if (startDiff === 1) {
+          statusText = '明日'; statusBg = 'var(--info-bg)'; statusColor = 'var(--info-text)';
+        } else {
+          statusText = `${startDiff}日後`; statusBg = 'var(--bg3)'; statusColor = 'var(--text2)';
+        }
+        // 車両カラーチップ
+        const vc = vehicleClass(r.vehicle);
+        const vs = vehicleChipStyle(r.vehicle);
+        const vehBadge = r.vehicle
+          ? `<span class="cal-event ${vc}" style="font-size:10px;padding:1px 6px;height:auto;line-height:1.2;${vs}">${escHtml(r.vehicle)}</span>`
+          : '';
+        return `
+          <div class="upc-row" data-project="${escHtml(r.project)}" data-datekey="${r.dateKey||''}" onclick="showProjectDetail(this.dataset.project,this.dataset.datekey,event)">
+            <div class="upc-left">
+              <div class="upc-date">${dateRange}</div>
+              <div class="upc-project">${escHtml(r.project)}</div>
+              <div class="upc-meta">
+                <span class="upc-status" style="background:${statusBg};color:${statusColor}">${statusText}</span>
+                ${r.staff ? `<span class="upc-staff"><i class="ti ti-user"></i> ${escHtml(r.staff)}</span>` : ''}
+                ${vehBadge}
+              </div>
+            </div>
+            <i class="ti ti-chevron-right upc-chev"></i>
+          </div>`;
+      }).join('');
     }
   }
 }
@@ -1696,7 +2243,14 @@ function renderReservations() {
     if (!groups[key]) groups[key] = { items: [], project: proj, dateKey: dk, staff: r.staff, dateOut: r.dateOut, dateReturn: r.dateReturn, vehicle: r.vehicle || '' };
     groups[key].items.push(r);
   });
-  container.innerHTML = Object.values(groups).map(g => {
+  // 搬入日が早い順に並べる
+  const sortedGroups = Object.values(groups).sort((a, b) => {
+    const da = parseDate(a.dateOut); const db = parseDate(b.dateOut);
+    const ta = da ? da.getTime() : Infinity;
+    const tb = db ? db.getTime() : Infinity;
+    return ta - tb;
+  });
+  container.innerHTML = sortedGroups.map(g => {
     const project = g.project;
     const _d = parseDate(g.dateOut);
     const _md = _d ? `（${_d.getMonth()+1}/${_d.getDate()}）` : '';
@@ -1705,7 +2259,7 @@ function renderReservations() {
       return `
       <div class="proj-item-row">
         <span class="proj-item-name">${escHtml(r.itemName || r.model || '')}${mkLabel}</span>
-        <span class="proj-item-qty">×${r.qty}</span>
+        <span class="proj-item-qty">${(r.qty|0) > 0 ? '×'+(r.qty|0) : ''}</span>
       </div>`;
     };
     const own    = g.items.filter(r => r.note !== '[レンタル]' && r.note !== '(在庫管理外)');
@@ -1723,7 +2277,7 @@ function renderReservations() {
       <div class="proj-group">
         <div class="proj-group-head" onclick="toggleGroup(this)">
           <div class="proj-group-left">
-            <i class="ti ti-chevron-down proj-chevron"></i>
+            <i class="ti ti-chevron-down proj-chevron" style="transform:rotate(-90deg)"></i>
             <span class="proj-group-name">${escHtml(project)}${_md}${loanBadge(project)}</span>
             <span class="proj-group-meta">${escHtml(g.staff||'担当未入力')}</span>
             <span class="badge s-info" style="font-size:10px"><i class="ti ti-calendar"></i> 搬入 ${escHtml(g.dateOut)}</span>
@@ -1731,6 +2285,9 @@ function renderReservations() {
           </div>
           <div class="proj-group-right">
             <span class="proj-count">${g.items.length}品目</span>
+            <button class="act" style="font-size:11px" onclick="openEditReservation('${project.replace(/'/g,"\\'")}','${g.dateKey}',event)">
+              <i class="ti ti-edit"></i> 編集
+            </button>
             <button class="act" style="font-size:11px" onclick="downloadPickupList('${project.replace(/'/g,"\\'")}','${g.dateKey}',event)">
               <i class="ti ti-file-download"></i> DL
             </button>
@@ -1739,9 +2296,17 @@ function renderReservations() {
             </button>
           </div>
         </div>
-        <div class="proj-group-body">${rows}</div>
+        <div class="proj-group-body" style="display:none">${rows}</div>
       </div>`;
   }).join('');
+}
+
+// 予約タブから案件編集モーダルを開く（既存 openEditProject を pdProject/pdDateKey 経由で流用）
+function openEditReservation(project, dateKey, e) {
+  if (e) e.stopPropagation();
+  pdProject = project;
+  pdDateKey = dateKey;
+  openEditProject();
 }
 
 function cancelReservation(project, dateKey, e) {
@@ -1813,10 +2378,69 @@ setInterval(fetchFromSpreadsheet, 300000);
 setInterval(checkAutoReturn, 60000);
 
 
-// Service Worker 登録
+// Service Worker 登録＋自動更新チェック
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/service-worker.js')
-      .catch(err => console.warn('SW registration failed:', err));
+  let _swReloading = false;
+  // 新SWが制御を握ったら一度だけリロード（最新アプリに切替）
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (_swReloading) return;
+    _swReloading = true;
+    location.reload();
   });
+  window.addEventListener('load', async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('/service-worker.js', { updateViaCache: 'none' });
+      const checkUpdate = () => { reg.update().catch(() => {}); };
+      // アプリを前面に戻した時＋1分ごとに更新チェック（インストール済みPWAでも最新を検知）
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(); });
+      setInterval(checkUpdate, 60 * 1000);
+      // 既に待機中の新SWがあればバナー表示
+      if (reg.waiting && navigator.serviceWorker.controller) showUpdateBanner(reg.waiting);
+      // 新SW検知→インストール完了でバナー
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', () => {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) showUpdateBanner(nw);
+        });
+      });
+    } catch (err) { console.warn('SW registration failed:', err); }
+  });
+}
+function showUpdateBanner(worker) {
+  window._pendingSW = worker;
+  const b = document.getElementById('update-banner');
+  if (b) b.style.display = 'flex';
+}
+function applyUpdate() {
+  const w = window._pendingSW;
+  if (w) w.postMessage({ type: 'SKIP_WAITING' }); // 新SWを有効化→controllerchange→自動リロード
+  setTimeout(() => location.reload(), 1500);       // 念のためのフォールバック
+}
+// 版番号を画面に表示（フッターはこの<script>より後に解析されるためDOM構築後にセット）
+function _setAppVersion(){ const v = document.getElementById('app-version'); if (v) v.textContent = APP_VERSION; }
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _setAppVersion); else _setAppVersion();
+
+// 在庫を持ち出し中レコードから再計算（ズレの手動訂正）
+function resyncStock() {
+  if (!confirm('持ち出し中の記録をもとに在庫数を再計算します。よろしいですか？')) return;
+  const btn = document.getElementById('resync-btn');
+  if (btn) { btn.disabled = true; }
+  const cb = 'resyncCb_' + Date.now();
+  window[cb] = function(json) {
+    delete window[cb];
+    const s = document.getElementById('jsonp_' + cb); if (s) s.remove();
+    if (btn) btn.disabled = false;
+    if (json && json.status === 'ok') {
+      alert(`在庫を再計算しました（${json.fixed}件を修正）`);
+      reloadData();
+    } else {
+      alert('再計算に失敗しました: ' + ((json && json.message) || '不明なエラー'));
+    }
+  };
+  const s = document.createElement('script');
+  s.id = 'jsonp_' + cb;
+  s.src = GAS_API_URL + '?action=debug_resync_master&callback=' + cb;
+  s.onerror = function() { delete window[cb]; s.remove(); if (btn) btn.disabled = false; alert('接続エラー'); };
+  document.body.appendChild(s);
 }

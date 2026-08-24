@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>機材在庫管理</title>
+<title>機材在庫管理（東京）</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
@@ -21,19 +21,30 @@
   <div class="spinner"></div>
   <div class="loading-label">読み込み中...</div>
 </div>
+<div id="update-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:99999;background:#2563eb;color:#fff;padding:10px 16px;align-items:center;justify-content:center;gap:14px;font-size:14px;box-shadow:0 2px 10px rgba(0,0,0,.35)">
+  <span><i class="ti ti-rocket" aria-hidden="true"></i> 新しいバージョンがあります</span>
+  <button onclick="applyUpdate()" style="background:#fff;color:#2563eb;border:none;border-radius:6px;padding:6px 16px;font-weight:700;cursor:pointer">今すぐ更新</button>
+</div>
 <div class="app">
   <header class="topbar">
     <div class="topbar-left">
       <i class="ti ti-package" aria-hidden="true"></i>
-      <h1>機材在庫管理</h1>
+      <h1>機材在庫管理（東京）</h1>
     </div>
     <div class="topbar-right">
       <button class="btn" onclick="reloadData()" id="reload-btn"><i class="ti ti-refresh" aria-hidden="true"></i> 更新</button>
-      <button class="btn" onclick="downloadPickupList()" id="pickup-btn"><i class="ti ti-file-download" aria-hidden="true"></i> 持ち出しリスト</button>
-      <button class="btn" onclick="document.getElementById('xlsxIn').click()"><i class="ti ti-upload" aria-hidden="true"></i> Excel読み込み</button>
-      <button class="btn" onclick="exportCSV()"><i class="ti ti-download" aria-hidden="true"></i> CSV出力</button>
-      <button class="btn btn-primary" onclick="openAddModal()"><i class="ti ti-plus" aria-hidden="true"></i> 機材追加</button>
-      <input type="file" id="xlsxIn" accept=".xlsx,.csv" style="display:none" onchange="handleFile(event)">
+      <button class="btn" onclick="downloadTemplate()" id="template-dl-btn"><i class="ti ti-file-download" aria-hidden="true"></i> 荷だし表DL</button>
+      <input type="file" id="template-file-input" accept=".xlsx,.xls" style="display:none" onchange="templateUploadFile(this)">
+      <button class="btn" onclick="triggerTemplateUpload()" id="template-btn"><i class="ti ti-file-spreadsheet" aria-hidden="true"></i> 荷だし表更新</button>
+      <input type="file" id="ingest-file-input" accept=".xlsx,.xls" style="display:none" onchange="ingestUploadFile(this)">
+      <button class="btn btn-primary" onclick="triggerIngestUpload()" id="ingest-btn"><i class="ti ti-file-upload" aria-hidden="true"></i> エクセル投入</button>
+      <div style="position:relative;display:inline-block">
+        <button class="btn" onclick="toggleMoreMenu(event)" id="more-btn" aria-label="その他メニュー"><i class="ti ti-dots" aria-hidden="true"></i></button>
+        <div id="more-menu" style="display:none;position:absolute;right:0;top:calc(100% + 6px);background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:6px;min-width:190px;z-index:200;box-shadow:var(--shadow-lg)">
+          <button class="btn" style="width:100%;justify-content:flex-start;margin-bottom:4px;font-size:14px;gap:8px" onclick="closeMoreMenu();resyncStock()"><i class="ti ti-calculator" aria-hidden="true" style="font-size:16px"></i> 在庫再計算</button>
+          <button class="btn" style="width:100%;justify-content:flex-start;font-size:14px;gap:8px" onclick="closeMoreMenu();openErrorList()"><i class="ti ti-alert-triangle" aria-hidden="true" style="font-size:16px"></i> エラー再投入</button>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -57,7 +68,6 @@
     <button class="tab" data-tab="reserve" onclick="switchTab('reserve',this)"><i class="ti ti-calendar-time" aria-hidden="true"></i> 持ち出し予約</button>
     <button class="tab" data-tab="special" onclick="switchTab('special',this)"><i class="ti ti-tool" aria-hidden="true"></i> 修理・レンタル・不在</button>
     <button class="tab" data-tab="history" onclick="switchTab('history',this)"><i class="ti ti-history" aria-hidden="true"></i> 履歴</button>
-    <button class="tab" data-tab="dashboard" onclick="switchTab('dashboard',this)"><i class="ti ti-layout-dashboard" aria-hidden="true"></i> ダッシュボード</button>
   </nav>
 
   <div id="view-all">
@@ -67,7 +77,7 @@
         <div class="dash-card">
           <div class="dash-card-head">
             <i class="ti ti-calendar-time" aria-hidden="true"></i>
-            <span>今後1週間の予約</span>
+            <span>本日から1週間の予定</span>
           </div>
           <div id="upcoming-content" style="padding:4px 0">
             <div style="text-align:center;padding:2rem;color:var(--text2);font-size:13px">読み込み中...</div>
@@ -98,6 +108,7 @@
         <option value="OUT">OUT</option><option value="修理中">修理中</option>
         <option value="レンタル中">レンタル中</option><option value="長期不在">長期不在</option>
       </select>
+      <button class="btn btn-primary" onclick="openAddModal()" style="white-space:nowrap"><i class="ti ti-plus" aria-hidden="true"></i> 機材追加</button>
     </div>
     <div class="inv-layout">
       <div class="cat-sidebar" id="cat-sidebar"></div>
@@ -268,9 +279,38 @@
     </div>
     <div class="modal-actions">
       <button class="btn" onclick="downloadPickupList(pdProject, pdDateKey)"><i class="ti ti-file-download"></i> 持ち出しリストDL</button>
+      <button class="btn" onclick="openEditProject()"><i class="ti ti-edit"></i> 編集</button>
       <button class="btn btn-primary" onclick="closeModal('modal-project-detail')">閉じる</button>
     </div>
   </div>
+</div>
+
+<!-- 案件編集モーダル -->
+<div class="modal-backdrop" id="modal-edit-project">
+  <div class="modal" style="max-width:640px">
+    <h3><i class="ti ti-edit" aria-hidden="true"></i> 案件を編集 <span id="ep-title" style="color:var(--text2);font-size:13px;margin-left:8px"></span></h3>
+    <div class="fr" style="max-height:60vh;overflow-y:auto">
+      <div class="ep-field"><label>案件名</label><input id="ep-project" type="text"></div>
+      <div class="ep-field"><label>担当者</label><input id="ep-staff" type="text" list="ep-staff-datalist"><datalist id="ep-staff-datalist"></datalist></div>
+      <div class="ep-field"><label>車両</label><input id="ep-vehicle" type="text" placeholder="例: キャラバン・トラック" list="ep-vehicle-datalist"><datalist id="ep-vehicle-datalist"></datalist></div>
+      <div class="ep-field"><label>搬入日</label><input id="ep-dateout" type="text" placeholder="2026/7/22"></div>
+      <div class="ep-field"><label>返却日</label><input id="ep-dateret" type="text" placeholder="2026/7/22"></div>
+      <div style="margin:12px 0 6px;font-size:13px;color:var(--text2);display:flex;justify-content:space-between;align-items:center">
+        <span>機材</span>
+        <button class="btn" style="padding:3px 8px;font-size:11px" onclick="epAddItem('own')"><i class="ti ti-plus"></i> 自社</button>
+      </div>
+      <div id="ep-items"></div>
+      <div style="margin-top:8px;display:flex;gap:6px">
+        <button class="btn" style="padding:3px 8px;font-size:11px" onclick="epAddItem('rental')"><i class="ti ti-building-store"></i> レンタル追加</button>
+        <button class="btn" style="padding:3px 8px;font-size:11px" onclick="epAddItem('free')"><i class="ti ti-note"></i> フリー追加</button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modal-edit-project')">キャンセル</button>
+      <button class="btn btn-primary" id="ep-save-btn" onclick="saveEditProject()"><i class="ti ti-check"></i> 保存</button>
+    </div>
+  </div>
+  <footer style="text-align:center;padding:20px 0 92px;color:var(--text2);font-size:11px;opacity:.6">機材在庫管理 <span id="app-version"></span></footer>
 </div>
 
 <!-- スマホ用ボトムナビ -->
@@ -280,8 +320,51 @@
   <button class="bnav-item" data-tab="out" onclick="switchTab('out',this)"><i class="ti ti-arrow-up-right" aria-hidden="true"></i><span>持出中</span></button>
   <button class="bnav-item" data-tab="reserve" onclick="switchTab('reserve',this)"><i class="ti ti-calendar-time" aria-hidden="true"></i><span>予約</span></button>
   <button class="bnav-item" data-tab="history" onclick="switchTab('history',this)"><i class="ti ti-history" aria-hidden="true"></i><span>履歴</span></button>
-  <button class="bnav-item" data-tab="dashboard" onclick="switchTab('dashboard',this)"><i class="ti ti-layout-dashboard" aria-hidden="true"></i><span>分析</span></button>
 </nav>
+
+<div class="modal-backdrop" id="modal-error">
+  <div class="modal">
+    <div class="modal-header">
+      <h3><i class="ti ti-alert-triangle"></i> エラー再投入</h3>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px">在庫不足などで処理できなかった受注書。在庫追加後に「再投入」で自動処理が再開されます。</div>
+      <div id="error-list-body">読み込み中...</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-error')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal-cal-day">
+  <div class="modal">
+    <div class="modal-header">
+      <h3><i class="ti ti-calendar-event"></i> <span id="cal-day-title">この日の予定</span></h3>
+    </div>
+    <div class="modal-body">
+      <div id="cal-day-body"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-cal-day')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal-conflict">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 style="color:var(--danger-text)"><i class="ti ti-alert-triangle"></i> 予約重複で在庫超過</h3>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px">同じ機材を、期間（日時）が重なって予約／持ち出ししています。日程・数量の調整、または在庫の追加が必要です。</div>
+      <div id="conflict-detail-body"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-conflict')">閉じる</button>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>

@@ -113,11 +113,29 @@ h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.2px; }
   border-radius: var(--radius-lg);
   padding: 14px 16px;
   box-shadow: var(--shadow-sm);
-  transition: transform 0.15s;
+  transition: transform 0.15s, box-shadow 0.15s;
+  display: flex; align-items: center; gap: 12px;
 }
 .stat:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
-.stat-label { font-size: 11px; color: var(--text2); margin-bottom: 6px; font-weight: 500; }
-.stat-val { font-size: 26px; font-weight: 700; font-family: var(--mono); letter-spacing: -0.5px; }
+.stat-icon {
+  width: 40px; height: 40px; border-radius: 10px;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.stat-icon i { font-size: 20px; }
+.stat-body { min-width: 0; flex: 1; }
+.stat-label { font-size: 11px; color: var(--text2); margin-bottom: 4px; font-weight: 600; letter-spacing: 0.02em; }
+.stat-val { font-size: 26px; font-weight: 700; font-family: var(--mono); letter-spacing: -0.5px; line-height: 1.1; }
+/* アクセント色 */
+.stat-primary .stat-icon { background: var(--primary-bg); color: var(--primary); }
+.stat-success .stat-icon { background: var(--success-bg); color: var(--success-text); }
+.stat-success .stat-val  { color: var(--success-text); }
+.stat-danger  .stat-icon { background: var(--danger-bg);  color: var(--danger-text); }
+.stat-danger  .stat-val  { color: var(--danger-text); }
+.stat-purple  .stat-icon { background: var(--purple-bg);  color: var(--purple-text); }
+.stat-purple  .stat-val  { color: var(--purple-text); }
+.stat-gray    .stat-icon { background: var(--gray-bg);    color: var(--gray-text); }
+.stat-gray    .stat-val  { color: var(--gray-text); }
 
 /* ===== バッジ ===== */
 .legend { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -452,29 +470,79 @@ tr:hover td { background: var(--bg3); }
 }
 .dash-card-head i { font-size: 18px; color: var(--primary); }
 
-/* カレンダー */
-.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; padding: 14px; }
-.cal-head { text-align: center; font-size: 12px; font-weight: 700; color: var(--text2); padding: 8px 0; }
-.cal-cell { min-height: 84px; padding: 6px; border-radius: 8px; font-size: 11px; position: relative; transition: background 0.12s; }
+/* カレンダー：セル高さは固定。多イベント日は「+N件」で畳んで一覧モーダルへ */
+.cal-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  column-gap: 4px; row-gap: 4px; padding: 12px;
+}
+.cal-head { text-align: center; font-size: 12px; font-weight: 700; color: var(--text2); padding: 8px 0; letter-spacing: 0.05em; }
+.cal-cell {
+  height: 96px; padding: 6px; border-radius: 10px; font-size: 11px;
+  position: relative; transition: background 0.12s, box-shadow 0.12s;
+  overflow: hidden; box-sizing: border-box;
+  display: flex; flex-direction: column;
+}
 .cal-cell.empty { background: none; }
-.cal-cell.today .cal-day {
+.cal-cell.has-event { background: var(--bg3); }
+.cal-cell.has-event:hover { background: var(--bg4); box-shadow: 0 0 0 1px var(--border2) inset; }
+/* 日付ラベル：常に同じ高さ(22px)を維持してチップ位置がズレないように */
+.cal-day {
+  font-size: 11px; font-weight: 600; color: var(--text2);
+  display: block; margin-bottom: 4px; height: 22px; line-height: 22px;
+}
+.cal-day-num { display: inline-block; min-width: 22px; text-align: left; }
+.cal-cell.today {
+  background: var(--primary-bg);
+}
+.cal-cell.today .cal-day-num {
   background: var(--primary); color: #fff;
   border-radius: 50%; width: 22px; height: 22px;
   display: inline-flex; align-items: center; justify-content: center;
-  font-weight: 600;
+  font-weight: 700; text-align: center;
 }
-.cal-cell.has-event { background: var(--bg3); }
-.cal-cell.has-event:hover { background: var(--bg4); }
-.cal-day { font-size: 11px; font-weight: 500; color: var(--text); display: block; margin-bottom: 3px; }
+/* 週末カラム */
+.cal-cell.sun .cal-day-num:not(.cal-cell.today *) { color: #dc2626; }
+.cal-cell.sat .cal-day-num:not(.cal-cell.today *) { color: #2563eb; }
+.cal-events { display: flex; flex-direction: column; gap: 3px; }
 .cal-event {
-  display: block; font-size: 10px; padding: 2px 6px;
+  display: block; font-size: 10.5px; padding: 3px 7px;
   border-radius: 4px; background: var(--info-bg); color: var(--info-text);
-  margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 600; line-height: 1.25;
 }
-.cal-event.ret { background: var(--success-bg); color: var(--success-text); }
-.cal-legend { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
-.cal-legend .cal-event { font-size: 11px; padding: 3px 8px; }
+.cal-event.veh-caravan { background: #dbeafe; color: #1e40af; }
+.cal-event.veh-truck   { background: #fef3c7; color: #92400e; }
+.cal-event.veh-rental  { background: #dcfce7; color: #166534; }
+.cal-event.veh-other   { background: #e5e7eb; color: #374151; }
+/* 複数日案件を帯として連続表示：セル境界を跨いで色が繋がる */
+.cal-event.cal-span-start { border-top-right-radius: 0; border-bottom-right-radius: 0; margin-right: -6px; padding-right: 8px; }
+.cal-event.cal-span-mid   { border-radius: 0; margin-left: -6px; margin-right: -6px; padding-left: 8px; padding-right: 8px; }
+.cal-event.cal-span-end   { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -6px; padding-left: 8px; }
+.cal-more {
+  display: block; margin-top: 2px; padding: 2px 6px;
+  border-radius: 4px; background: var(--bg4); color: var(--text2);
+  font-size: 10px; font-weight: 700; text-align: center;
+  cursor: pointer; transition: background 0.12s, color 0.12s;
+}
+.cal-more:hover { background: var(--primary); color: #fff; }
+/* 本日から1週間の予定 */
+.upc-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-bottom: 0.5px solid var(--border);
+  cursor: pointer; transition: background 0.12s;
+}
+.upc-row:hover { background: var(--bg3); }
+.upc-row:last-child { border-bottom: none; }
+.upc-left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.upc-date { font-size: 12px; color: var(--text2); font-weight: 500; }
+.upc-project { font-size: 14px; font-weight: 700; color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+.upc-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.upc-status { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 6px; white-space: nowrap; }
+.upc-staff { font-size: 11px; color: var(--text2); display: inline-flex; align-items: center; gap: 3px; }
+.upc-staff i { font-size: 12px; }
+.upc-chev { font-size: 16px; color: var(--text2); flex-shrink: 0; }
+.cal-legend { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.cal-legend .cal-event { font-size: 11px; padding: 3px 8px; height: auto; line-height: 1; }
 
 /* レポート */
 .rep-list { padding: 12px 16px; }
@@ -556,7 +624,9 @@ tr:hover td { background: var(--bg3); }
   .bottom-nav { display: flex; }
 
   .stats { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-  .stat { padding: 10px 12px; border-radius: var(--radius); }
+  .stat { padding: 10px 12px; border-radius: var(--radius); gap: 10px; }
+  .stat-icon { width: 34px; height: 34px; border-radius: 8px; }
+  .stat-icon i { font-size: 17px; }
   .stat-val { font-size: 20px; }
 
   .legend { margin-bottom: 10px; gap: 4px; }
@@ -597,6 +667,23 @@ tr:hover td { background: var(--bg3); }
   .top-layout { grid-template-columns: 1fr; }
   .top-left { position: static; }
 
-  .cal-cell { min-height: 60px; padding: 3px; }
-  .cal-event { font-size: 9px; padding: 1px 4px; }
+  .cal-grid { column-gap: 3px; row-gap: 3px; padding: 8px; }
+  .cal-cell { height: 72px; padding: 4px; }
+  .cal-event { font-size: 10px; padding: 2px 5px; }
+  .cal-events { gap: 2px; }
 }
+
+/* 案件編集モーダル */
+.ep-field { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.ep-field label { min-width: 60px; font-size: 12px; color: var(--text2); }
+.ep-field input { flex: 1; padding: 5px 8px; border: 1px solid var(--border); background: var(--bg2); color: var(--text); border-radius: 4px; font-size: 13px; }
+.ep-item-row { display: flex; align-items: center; gap: 6px; margin: 4px 0; padding: 4px 6px; background: var(--bg3); border-radius: 6px; }
+.ep-item-row input { padding: 4px 6px !important; border: 1px solid var(--border); background: var(--bg2); color: var(--text); border-radius: 4px; font-size: 12px !important; width: auto !important; }
+.ep-item-row .ep-in-maker { width: 100px !important; flex: 0 0 auto; }
+.ep-item-row .ep-in-name { flex: 1 1 auto !important; min-width: 0; width: auto !important; }
+.ep-item-row .ep-in-qty { width: 60px !important; flex: 0 0 auto; }
+.ep-badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; min-width: 46px; text-align: center; font-weight: 500; }
+.ep-badge.ep-own { background: #dbeafe; color: #1e40af; }
+.ep-badge.ep-rental { background: #dcfce7; color: #166534; }
+.ep-badge.ep-free { background: #fef3c7; color: #92400e; }
+.ep-del { padding: 4px 6px !important; }
