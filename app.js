@@ -9,7 +9,7 @@ const _isBranchPreview = _host.includes('-git-') && !_host.includes('-git-main-'
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbzDee57zJG_9_9G-wTEaSglONOdeQU_mJh8tMjIlfvMqQ2bkGLTWHpcaDUvuKe8Y9sWOg/exec'; // 東京拠点GAS（固定）
 
 // ★アプリの版番号（画面表示用）。デプロイのたびに service-worker.js の CACHE_NAME と揃えて上げる
-const APP_VERSION = 'v59';
+const APP_VERSION = 'v60';
 
 const SC = {
   'IN':        {cls:'s-in',    icon:'ti-circle-check'},
