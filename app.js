@@ -13,7 +13,7 @@ const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbzDee57zJG_9_9G-wTE
 const STAFF_SHIFT_COLS = [2, 3, 4, 5, 10, 11, 12];
 
 // ★アプリの版番号（画面表示用）。デプロイのたびに service-worker.js の CACHE_NAME と揃えて上げる
-const APP_VERSION = 'v69';
+const APP_VERSION = 'v70';
 
 const SC = {
   'IN':        {cls:'s-in',    icon:'ti-circle-check'},
@@ -555,7 +555,12 @@ function renderOut() {
     if (!groups[key]) groups[key] = {items:[], project:proj, dateKey:dk, staff:o.staff, returnDate:o.returnDate, dateOut:o.dateOut};
     groups[key].items.push({...o, outIdx:i});
   });
-  container.innerHTML = Object.values(groups).map(g => {
+  // 予約タブと同様に搬入日が早い順に並べる
+  const sortedGroups = Object.values(groups).sort((a, b) => {
+    const da = parseDate(a.dateOut); const db = parseDate(b.dateOut);
+    return (da ? da.getTime() : Infinity) - (db ? db.getTime() : Infinity);
+  });
+  container.innerHTML = sortedGroups.map(g => {
     const project = g.project;
     const _d = parseDate(g.dateOut);
     const _md = _d ? `（${_d.getMonth()+1}/${_d.getDate()}）` : '';
@@ -589,7 +594,7 @@ function renderOut() {
       <div class="proj-group">
         <div class="proj-group-head" onclick="toggleGroup(this)">
           <div class="proj-group-left">
-            <i class="ti ti-chevron-down proj-chevron"></i>
+            <i class="ti ti-chevron-down proj-chevron" style="transform:rotate(-90deg)"></i>
             <span class="proj-group-name">${project}${_md}${loanBadge(project)}</span>
             <span class="proj-group-meta">${g.staff||'担当未入力'}</span>
             ${autoLabel}
@@ -604,7 +609,7 @@ function renderOut() {
             </button>
           </div>
         </div>
-        <div class="proj-group-body">${itemRows}</div>
+        <div class="proj-group-body" style="display:none">${itemRows}</div>
       </div>`;
   }).join('');
 }
