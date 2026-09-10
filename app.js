@@ -13,7 +13,7 @@ const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbzDee57zJG_9_9G-wTE
 const STAFF_SHIFT_COLS = [2, 3, 4, 5, 10, 11, 12];
 
 // ★アプリの版番号（画面表示用）。デプロイのたびに service-worker.js の CACHE_NAME と揃えて上げる
-const APP_VERSION = 'v67';
+const APP_VERSION = 'v68';
 
 const SC = {
   'IN':        {cls:'s-in',    icon:'ti-circle-check'},
