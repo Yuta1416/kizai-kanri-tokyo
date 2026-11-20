@@ -21,7 +21,7 @@ const SELF_LABEL = PEER_LABEL === '東京' ? '大阪' : (PEER_LABEL === '大阪'
 const SELF_LOC   = SELF_LABEL === '大阪' ? 'osaka' : (SELF_LABEL === '東京' ? 'tokyo' : '');
 
 // ★アプリの版番号（画面表示用）。デプロイのたびに service-worker.js の CACHE_NAME と揃えて上げる
-const APP_VERSION = 'v125';
+const APP_VERSION = 'v126';
 
 const SC = {
   'IN':        {cls:'s-in',    icon:'ti-circle-check'},
@@ -1311,7 +1311,7 @@ function doEditNote() {
 // GAS通信（JSONP）。GASのコールドスタート対策として自動リトライ＋タイムアウトを備える。
 //  - script読み込みエラー（＝コールドの一時HTMLをJSとして読めない＝サーバー未実行）のときだけ再送。
 //  - 応答が来ない（タイムアウト）ときは、サーバーで実行済みの可能性があるため再送せず失敗として返す（二重反映防止）。
-function gasJsonp(params, onDone, _attempt) {
+function gasJsonp(params, onDone, _attempt, timeoutMs) {
   if (!GAS_API_URL || GAS_API_URL === 'ここにGASのURLを貼り付け') { if(onDone) onDone({status:'error',message:'API未設定'}); return; }
   _attempt = _attempt || 1;
   const MAX_ATTEMPTS = 3;                 // 初回＋2リトライ
@@ -1333,7 +1333,7 @@ function gasJsonp(params, onDone, _attempt) {
   const softFail = function(msg){
     if (settled) return;
     cleanup();
-    if (SAFE_RETRY && _attempt < MAX_ATTEMPTS) { setTimeout(function(){ gasJsonp(base, onDone, _attempt + 1); }, 700 * _attempt); }
+    if (SAFE_RETRY && _attempt < MAX_ATTEMPTS) { setTimeout(function(){ gasJsonp(base, onDone, _attempt + 1, timeoutMs); }, 700 * _attempt); }
     else { settled = true; if (onDone) onDone({status:'error', message: msg || '通信エラー'}); }
   };
   window[cbName] = succeed;
@@ -1343,8 +1343,8 @@ function gasJsonp(params, onDone, _attempt) {
   script.onerror = function(){ softFail('通信エラー'); };
   timer = setTimeout(function(){
     if (settled) return; settled = true; cleanup();
-    if (onDone) onDone({status:'error', message:'応答がありませんでした（時間切れ）。もう一度お試しください。'});
-  }, 20000);
+    if (onDone) onDone({status:'error', timeout:true, message:'応答がありませんでした（時間切れ）。もう一度お試しください。'});
+  }, timeoutMs || 20000);
   document.body.appendChild(script);
 }
 // GASを事前に温める（コールドスタート緩和）。編集画面を開いた時などに先行で呼ぶ＝保存時には温まっている。
@@ -2360,6 +2360,16 @@ function saveEditProject() {
       alert('反映しました。荷出しリストの再生成が続く場合があります（20〜40秒）。画面は自動で更新されます。');
       return;
     }
+    // 時間切れ＝応答が返らなかっただけで、サーバー側は反映が続いている（＝実際にはほぼ成功している）。
+    //   編集画面に戻さず閉じて、自動リロードに任せる。かぶり/在庫超過などの本当の失敗は即statusが返るのでここには来ない。
+    if (json.timeout) {
+      epOpId = '';
+      closeModal('modal-edit-project');
+      closeModal('modal-project-detail');
+      try { reloadData(); } catch(_) {}
+      alert('反映に時間がかかっています。バックグラウンドで処理が続いています（20〜40秒）。画面は自動で更新されるので、少し待って内容をご確認ください。');
+      return;
+    }
     // 失敗はここで必ず表示する（かぶり/在庫超過は理由も出す）。モーダルは開いたまま＝そのまま直せる
     if (json.conflict && json.conflict.message) {
       alert('保存できませんでした（元の内容はそのまま残っています）。\n\n' + json.conflict.message);
@@ -2370,7 +2380,7 @@ function saveEditProject() {
     } else {
       alert('保存できませんでした：' + (json.message || '通信エラー') + '\nもう一度お試しください。');
     }
-  });
+  }, 1, 90000);   // 案件編集は再生成に時間がかかるため待ち時間を長めに（既定20秒→90秒）
   // 反映結果を取り込むため段階的に自動リロード（機材が多い案件は時間がかかるため2回）
   setTimeout(() => { try { reloadData(); } catch(_){} }, 30000);
   setTimeout(() => { try { reloadData(); } catch(_){} }, 60000);
